@@ -23,7 +23,7 @@ const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
 });
 
-client.once("ready", async () => {
+client.once("clientReady", () => {
   console.log(`[relay] logged in as ${client.user?.tag ?? "unknown"}`);
 
   const hasGateway = Boolean(env.GATEWAY_URL) && Boolean(env.INTERNAL_API_KEY);
