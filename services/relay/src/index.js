@@ -20,10 +20,18 @@ server.listen(env.PORT, "0.0.0.0", () => {
 });
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent
+  ],
 });
 
-client.once("clientReady", () => {
+client.on("error", (e) => console.error("[relay] client error", e));
+process.on("unhandledRejection", (e) => console.error("[relay] unhandledRejection", e));
+process.on("uncaughtException", (e) => console.error("[relay] uncaughtException", e));
+
+client.once("clientReady", async () => {
   console.log(`[relay] logged in as ${client.user?.tag ?? "unknown"}`);
 
   const hasGateway = Boolean(env.GATEWAY_URL) && Boolean(env.INTERNAL_API_KEY);
