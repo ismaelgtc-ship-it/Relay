@@ -1,5 +1,5 @@
-import { computeDiff } from "../diff/engine.js";
 import { getDb } from "../db/mongo.js";
+import { computeDiff } from "../diff/engine.js";
 
 export async function saveSnapshot(snapshot) {
   const db = await getDb();
@@ -13,7 +13,7 @@ export async function saveSnapshot(snapshot) {
 
   const result = await collection.insertOne({
     ...snapshot,
-    takenAt: new Date()
+    takenAt: new Date(),
   });
 
   const current = await collection.findOne({ _id: result.insertedId });
@@ -24,4 +24,14 @@ export async function saveSnapshot(snapshot) {
   }
 
   return current;
+}
+
+export async function getLatestSnapshot(guildId) {
+  const db = await getDb();
+  return db
+    .collection("guild_snapshots")
+    .find({ guildId })
+    .sort({ takenAt: -1 })
+    .limit(1)
+    .next();
 }
