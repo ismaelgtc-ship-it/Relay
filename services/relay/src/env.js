@@ -8,6 +8,10 @@ const EnvSchema = z.object({
   GATEWAY_URL: z.string().url().optional().or(z.literal("")),
   INTERNAL_API_KEY: z.string().min(16).optional().or(z.literal("")),
 
+  // Snapshot/clone (optional but recommended)
+  GUILD_ID: z.string().min(1).optional().or(z.literal("")),
+  RELAY_SECRET: z.string().min(16).optional().or(z.literal("")),
+
   // Render Web Services provide PORT; we also allow local/dev defaults.
   PORT: z.coerce.number().int().positive().default(10000),
 
