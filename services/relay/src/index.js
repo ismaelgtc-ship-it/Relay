@@ -4,7 +4,6 @@ import { env } from "./env.js";
 import { gatewayRegister, gatewayHeartbeat } from "./gatewayClient.js";
 
 // Render (Free) Web Service health checks require an HTTP listener.
-// This endpoint is intentionally minimal and does not expose internals.
 const server = http.createServer((req, res) => {
   const url = req.url ?? "/";
   if (url === "/healthz" || url === "/") {
@@ -12,7 +11,6 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify({ status: "ok", service: "relay" }));
     return;
   }
-
   res.writeHead(404, { "content-type": "application/json" });
   res.end(JSON.stringify({ status: "not_found" }));
 });
@@ -28,11 +26,15 @@ const client = new Client({
 client.once("ready", async () => {
   console.log(`[relay] logged in as ${client.user?.tag ?? "unknown"}`);
 
-  await gatewayRegister();
-
-  setInterval(() => {
-    gatewayHeartbeat().catch((err) => console.error("[relay] heartbeat error", err));
-  }, 30_000);
+  const hasGateway = Boolean(env.GATEWAY_URL) && Boolean(env.INTERNAL_API_KEY);
+  if (hasGateway) {
+    await gatewayRegister();
+    setInterval(() => {
+      gatewayHeartbeat().catch((err) => console.error("[relay] heartbeat error", err));
+    }, 30_000);
+  } else {
+    console.log("[relay] gateway disabled (no GATEWAY_URL / INTERNAL_API_KEY)");
+  }
 });
 
 client.login(env.DISCORD_TOKEN);
