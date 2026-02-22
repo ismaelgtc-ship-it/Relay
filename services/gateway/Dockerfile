@@ -1,19 +1,18 @@
 FROM node:20-alpine
 
-# IMPORTANT (Render Docker): build context is repo root (.) in our Render setup.
-# We COPY only the files we need so we never overwrite node_modules.
+# Render setup (per-service Docker build context):
+# - Root Directory: services/gateway
+# - Dockerfile Path: services/gateway/Dockerfile
+# - Docker Build Context Directory: services/gateway
 
 WORKDIR /app
 
 # Install production deps for the gateway service
-COPY services/gateway/package.json services/gateway/package-lock.json* ./
+COPY package.json package-lock.json* ./
 RUN if [ -f package-lock.json ]; then npm ci --omit=dev; else npm i --omit=dev; fi
 
-# Copy gateway runtime sources (do NOT copy the whole directory to avoid clobbering node_modules)
-COPY services/gateway/src ./src
-
-# Shared packages (manifest, etc.)
-COPY packages ./packages
+# Copy runtime sources (do not copy node_modules)
+COPY src ./src
 
 ENV NODE_ENV=production
 EXPOSE 3000

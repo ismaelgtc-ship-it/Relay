@@ -5,7 +5,7 @@ import { env } from "./env.js";
 import { requireDashboardKey, requireInternalKey } from "./auth.js";
 import { registerService, heartbeat, listServices } from "./registry.js";
 import { listModules, getModule, setModuleConfig, lockModule, unlockModule } from "./modulesStore.js";
-import { isKnownModule } from "../../../packages/core/moduleManifest.js";
+import { isKnownModule } from "./moduleManifest.js";
 
 const app = express();
 app.disable("x-powered-by");

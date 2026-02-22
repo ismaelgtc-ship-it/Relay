@@ -1,21 +1,21 @@
 FROM node:20-alpine
 
-# IMPORTANT (Render Docker): build context is repo root (.) in our Render setup.
-# Copy only what we need so we never overwrite node_modules.
+# Render setup (per-service Docker build context):
+# - Root Directory: services/relay
+# - Dockerfile Path: services/relay/Dockerfile
+# - Docker Build Context Directory: services/relay
 
 WORKDIR /app
 
-# Install production deps for relay service
-COPY services/relay/package.json services/relay/package-lock.json* ./
+# Install production deps for the relay service
+COPY package.json package-lock.json* ./
 RUN if [ -f package-lock.json ]; then npm ci --omit=dev; else npm i --omit=dev; fi
 
-# Copy relay runtime sources (avoid copying node_modules from repo)
-COPY services/relay/src ./src
-COPY services/relay/commands ./commands
-COPY services/relay/interactions ./interactions
-COPY services/relay/index.js ./index.js
-
-COPY packages ./packages
+# Copy runtime sources (do not copy node_modules)
+COPY src ./src
+COPY commands ./commands
+COPY interactions ./interactions
+COPY index.js ./index.js
 
 ENV NODE_ENV=production
 CMD ["node", "src/index.js"]

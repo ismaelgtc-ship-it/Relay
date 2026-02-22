@@ -1,7 +1,6 @@
 import { z } from "zod";
 import { getDb } from "./db.js";
-import { MODULE_MANIFEST, isKnownModule } from "../../../packages/core/moduleManifest.js";
-import { isLanguage } from "../../../packages/core/languages.js";
+import { MODULE_MANIFEST, isKnownModule } from "./moduleManifest.js";
 
 const COL_CONFIG = "modules_config";
 const COL_LOCKS = "module_locks";
@@ -30,7 +29,7 @@ function validateMirrorConfig(config) {
     const langsInGroup = new Set();
     for (const [channelId, langRaw] of Object.entries(g.channels ?? {})) {
       const lang = String(langRaw).toUpperCase();
-      if (!isLanguage(lang)) return { ok: false, error: "INVALID_LANGUAGE", details: { channelId, lang } };
+      if (!/^[A-Z]{2,5}i.test(String(lang))) return { ok: false, error: "INVALID_LANGUAGE", details: { channelId, lang } };
       if (seenChannels.has(channelId)) return { ok: false, error: "DUPLICATE_CHANNEL", details: { channelId } };
       if (langsInGroup.has(lang)) return { ok: false, error: "DUPLICATE_LANGUAGE", details: { group: g.name, lang } };
       seenChannels.add(channelId);
