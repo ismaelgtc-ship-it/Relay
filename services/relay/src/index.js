@@ -3,9 +3,17 @@ import { loadCommands } from "./commands/index.js";
 // NOTE: interactions live at /services/relay/interactions (sibling of /src)
 // so we import one level up.
 import { handleInteraction } from "../interactions/handler.js";
+import { createServer } from "./http/server.js";
 import dotenv from "dotenv";
 
 dotenv.config();
+
+// Render Web Service readiness: bind an HTTP server to $PORT.
+// If you run this as a Background Worker, this still doesn't hurt.
+const PORT = Number(process.env.PORT || 10000);
+createServer().listen(PORT, "0.0.0.0", () => {
+  console.log(`[relay] health server listening on :${PORT}`);
+});
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds]
