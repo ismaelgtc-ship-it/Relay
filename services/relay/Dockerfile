@@ -1,7 +1,7 @@
 FROM node:20-alpine
 
-# IMPORTANT (Render Docker): builds often run with repo root as build context.
-# This Dockerfile is written to work with build context = "." (repo root).
+# IMPORTANT (Render Docker): build context is repo root (.) in our Render setup.
+# Copy only what we need so we never overwrite node_modules.
 
 WORKDIR /app
 
@@ -9,8 +9,12 @@ WORKDIR /app
 COPY services/relay/package.json services/relay/package-lock.json* ./
 RUN if [ -f package-lock.json ]; then npm ci --omit=dev; else npm i --omit=dev; fi
 
-# Copy relay sources + shared packages (if any)
-COPY services/relay ./
+# Copy relay runtime sources (avoid copying node_modules from repo)
+COPY services/relay/src ./src
+COPY services/relay/commands ./commands
+COPY services/relay/interactions ./interactions
+COPY services/relay/index.js ./index.js
+
 COPY packages ./packages
 
 ENV NODE_ENV=production
