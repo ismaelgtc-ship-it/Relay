@@ -1,29 +1,39 @@
-/**
- * In-memory registry (skeleton).
- * Can be swapped to Mongo later without changing contract shape.
- */
-const services = new Map();
+import { getDb } from "./db.js";
 
-export function registerService(service, payload = {}) {
+const COL = "service_registry";
+
+export async function registerService(service, payload = {}) {
+  const db = await getDb();
   const now = Date.now();
-  services.set(service, {
-    service,
-    version: payload.version ?? "0.0.0",
-    meta: payload.meta ?? {},
-    firstSeenAt: now,
-    lastHeartbeatAt: now
-  });
+  await db.collection(COL).updateOne(
+    { service },
+    {
+      $setOnInsert: { firstSeenAt: now },
+      $set: {
+        service,
+        version: payload.version ?? "0.0.0",
+        meta: payload.meta ?? {},
+        lastHeartbeatAt: now
+      }
+    },
+    { upsert: true }
+  );
 }
 
-export function heartbeat(service) {
+export async function heartbeat(service) {
+  const db = await getDb();
   const now = Date.now();
-  const cur = services.get(service);
-  if (!cur) return false;
-  cur.lastHeartbeatAt = now;
-  services.set(service, cur);
-  return true;
+  const res = await db
+    .collection(COL)
+    .updateOne({ service }, { $set: { lastHeartbeatAt: now } });
+  return res.matchedCount > 0;
 }
 
-export function listServices() {
-  return Array.from(services.values()).sort((a, b) => a.service.localeCompare(b.service));
+export async function listServices() {
+  const db = await getDb();
+  return db
+    .collection(COL)
+    .find({}, { projection: { _id: 0 } })
+    .sort({ service: 1 })
+    .toArray();
 }

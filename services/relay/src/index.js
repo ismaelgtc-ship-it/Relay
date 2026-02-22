@@ -1,91 +1,129 @@
-import { Client, GatewayIntentBits, Partials, Events } from "discord.js";
+import http from "node:http";
+import { Client, GatewayIntentBits, Events, REST, Routes } from "discord.js";
 import { env } from "./env.js";
-import { startHttpServer } from "./http/server.js";
-import { startSnapshotLoop } from "./snapshot/runner.js";
-import { gatewayRegister, gatewayHeartbeat } from "./gatewayClient.js";
-import { pullRealtimeModuleStates, isModuleRunnable } from "./modules/index.js";
-import { createMirrorRuntime } from "./modules/mirror/index.js";
+import { commands, getCommand } from "../commands/index.js";
+import { gatewayRegister, gatewayHeartbeat, gatewayGetModule } from "./gatewayClient.js";
+import { createMirrorRuntime } from "./modules/mirror.js";
+import { buildGuildSnapshot } from "./snapshot.js";
 
-console.log("[relay] boot", { version: env.SERVICE_VERSION });
+const mirror = createMirrorRuntime();
 
-const intents = [GatewayIntentBits.Guilds];
-if (env.ENABLE_GUILD_MESSAGES) intents.push(GatewayIntentBits.GuildMessages);
-if (env.ENABLE_MESSAGE_CONTENT) intents.push(GatewayIntentBits.MessageContent);
+// Render health checks require an HTTP listener.
+const server = http.createServer(async (req, res) => {
+  const url = req.url ?? "/";
 
-const client = new Client({ intents, partials: [Partials.Channel] });
-
-// Always start HTTP server (health + optional snapshot API)
-startHttpServer({ client });
-
-// Module state cache
-let moduleStates = {};
-const mirror = createMirrorRuntime({
-  client,
-  getState: () => moduleStates.mirror
-});
-mirror.bind();
-
-async function setupGatewayLoop() {
-  const canGateway = Boolean(env.GATEWAY_URL) && Boolean(env.INTERNAL_API_KEY);
-  if (!canGateway) {
-    console.log("[relay] gateway disabled (no GATEWAY_URL / INTERNAL_API_KEY)");
+  if (url === "/" || url === "/healthz") {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ ok: true, service: "relay", ts: new Date().toISOString() }));
     return;
   }
 
-  const ok = await gatewayRegister({
-    gatewayUrl: env.GATEWAY_URL,
-    internalKey: env.INTERNAL_API_KEY,
-    version: env.SERVICE_VERSION,
-    meta: { node: process.version }
-  }).catch(() => false);
-
-  console.log("[relay] gatewayRegister", { ok });
-
-  setInterval(() => {
-    gatewayHeartbeat({ gatewayUrl: env.GATEWAY_URL, internalKey: env.INTERNAL_API_KEY }).catch(() => {});
-  }, 30_000);
-}
-
-async function setupModulePoller() {
-  const canGateway = Boolean(env.GATEWAY_URL) && Boolean(env.INTERNAL_API_KEY);
-  if (!canGateway) return;
-
-  let last = {};
-
-  async function tick() {
-    const states = await pullRealtimeModuleStates().catch(() => ({}));
-
-    // log transitions
-    for (const [name, state] of Object.entries(states)) {
-      const prev = last[name];
-      const nowRunnable = isModuleRunnable(state);
-      const prevRunnable = prev ? isModuleRunnable(prev) : null;
-
-      if (prevRunnable === null || prevRunnable !== nowRunnable) {
-        console.log("[relay] module", name, {
-          runnable: nowRunnable,
-          active: state.active,
-          locked: state.locked
-        });
-      }
+  if (url === "/internal/snapshot") {
+    const secret = req.headers["x-relay-secret"];
+    if (!secret || secret !== env.SNAPSHOT_API_KEY) {
+      res.writeHead(401, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "UNAUTHORIZED" }));
+      return;
     }
 
-    moduleStates = states;
-    last = states;
+    const guild = client.guilds.cache.get(env.GUILD_ID) ?? (await client.guilds.fetch(env.GUILD_ID).catch(() => null));
+    if (!guild) {
+      res.writeHead(404, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "GUILD_NOT_FOUND" }));
+      return;
+    }
+
+    await guild.roles.fetch().catch(() => null);
+    await guild.channels.fetch().catch(() => null);
+
+    const snapshot = await buildGuildSnapshot(guild);
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ ok: true, snapshot }));
+    return;
   }
 
-  await tick();
-  setInterval(tick, 20_000);
+  res.writeHead(404, { "content-type": "application/json" });
+  res.end(JSON.stringify({ ok: false, error: "NOT_FOUND" }));
+});
+
+server.listen(env.PORT, "0.0.0.0", () => {
+  console.log(`[relay] http listening on :${env.PORT}`);
+});
+
+const client = new Client({
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
+});
+
+async function refreshModules() {
+  const { statusCode, data } = await gatewayGetModule({
+    gatewayUrl: env.GATEWAY_URL,
+    internalKey: env.INTERNAL_API_KEY,
+    name: "mirror"
+  });
+
+  if (statusCode === 200 && data?.ok) {
+    mirror.setState({ active: data.active, locked: data.locked, config: data.config });
+  }
 }
 
 client.once(Events.ClientReady, async () => {
-  console.log("[relay] ready", { user: client.user?.tag });
+  console.log(`[relay] logged in as ${client.user?.tag ?? "unknown"}`);
 
-  // Optional: periodic snapshots for Overseer to pull
-  startSnapshotLoop({ client });
+  // Presence
+  await client.user?.setPresence({
+    activities: [{ name: "Relaying translations • Live Service" }],
+    status: "online"
+  }).catch(() => null);
 
-  await setupGatewayLoop();
-  await setupModulePoller();
+  // Register in Gateway
+  await gatewayRegister({
+    gatewayUrl: env.GATEWAY_URL,
+    internalKey: env.INTERNAL_API_KEY,
+    service: "realtime",
+    version: "1.0.0",
+    meta: { slug: "relay" }
+  }).catch((e) => console.error("[relay] gateway register failed", e));
+
+  // Register slash commands (only non-control commands allowed)
+  const rest = new REST({ version: "10" }).setToken(env.DISCORD_TOKEN);
+  await rest.put(Routes.applicationGuildCommands(env.CLIENT_ID, env.GUILD_ID), {
+    body: commands.map((c) => c.data)
+  });
+
+  console.log("[relay] slash commands registered");
+
+  // Start heartbeats
+  setInterval(() => {
+    gatewayHeartbeat({
+      gatewayUrl: env.GATEWAY_URL,
+      internalKey: env.INTERNAL_API_KEY,
+      service: "realtime"
+    }).catch(() => null);
+  }, 30_000);
+
+  // Module refresh loop
+  await refreshModules().catch(() => null);
+  setInterval(() => refreshModules().catch(() => null), 10_000);
+});
+
+client.on(Events.InteractionCreate, async (interaction) => {
+  if (!interaction.isChatInputCommand()) return;
+
+  const command = getCommand(interaction.commandName);
+  if (!command) return;
+
+  try {
+    await command.execute(interaction);
+  } catch (err) {
+    console.error("[relay] command error", err);
+    if (!interaction.replied && !interaction.deferred) {
+      await interaction.reply({ content: "Command error.", ephemeral: true });
+    }
+  }
+});
+
+client.on(Events.MessageCreate, async (message) => {
+  await mirror.onMessage(message);
 });
 
 client.login(env.DISCORD_TOKEN);

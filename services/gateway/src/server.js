@@ -1,18 +1,11 @@
 import express from "express";
 import helmet from "helmet";
 import morgan from "morgan";
-import { z } from "zod";
-
 import { env } from "./env.js";
 import { requireDashboardKey, requireInternalKey } from "./auth.js";
-import { registerService, heartbeat, listServices } from "./store/registry.js";
-import {
-  listModuleStates,
-  getModuleState,
-  putModuleConfig,
-  setModuleLock
-} from "./store/modules.js";
-import { writeAudit } from "./store/audit.js";
+import { registerService, heartbeat, listServices } from "./registry.js";
+import { listModules, getModule, setModuleConfig, lockModule, unlockModule } from "./modulesStore.js";
+import { isKnownModule } from "../../../packages/core/moduleManifest.js";
 
 const app = express();
 app.disable("x-powered-by");
@@ -20,114 +13,70 @@ app.use(helmet());
 app.use(express.json({ limit: "1mb" }));
 app.use(morgan("tiny"));
 
-app.get("/api/core/health", (_req, res) => {
+// Render health checks (no auth)
+app.get(["/", "/healthz"], (_req, res) => {
   res.json({ ok: true, service: "gateway", ts: new Date().toISOString() });
 });
 
-function computeUp(services) {
-  const now = Date.now();
-  return services.map((s) => {
-    const last = s.lastHeartbeatAt ? new Date(s.lastHeartbeatAt).getTime() : 0;
-    return {
-      service: s.service,
-      version: s.version ?? "0.0.0",
-      meta: s.meta ?? {},
-      firstSeenAt: s.firstSeenAt,
-      lastHeartbeatAt: s.lastHeartbeatAt,
-      isUp: now - last <= 90_000
-    };
-  });
-}
-
-app.get("/api/core/public-status", async (_req, res) => {
-  const services = await listServices();
-  res.json({ ok: true, services: computeUp(services) });
+// Contract health (Dashboard -> Gateway) requires API key
+app.get("/api/core/health", requireDashboardKey, (_req, res) => {
+  res.json({ ok: true, service: "gateway", ts: new Date().toISOString() });
 });
 
 app.get("/api/core/status", requireDashboardKey, async (_req, res) => {
-  const services = await listServices();
-  res.json({ ok: true, services: computeUp(services) });
+  const now = Date.now();
+  const services = (await listServices()).map((s) => ({
+    ...s,
+    isUp: now - (s.lastHeartbeatAt ?? 0) <= 90_000
+  }));
+  res.json({ ok: true, services });
 });
 
-// Dashboard → Gateway module control
+// Modules (Dashboard -> Gateway)
 app.get("/api/modules", requireDashboardKey, async (_req, res) => {
-  const modules = await listModuleStates();
+  const modules = await listModules();
   res.json({ ok: true, modules });
 });
 
 app.get("/api/modules/:name", requireDashboardKey, async (req, res) => {
-  const mod = await getModuleState(req.params.name);
-  if (!mod) return res.status(404).json({ ok: false, error: "NOT_FOUND" });
+  const name = String(req.params.name);
+  const mod = await getModule(name);
+  if (!mod) return res.status(404).json({ ok: false, error: "UNKNOWN_MODULE" });
   return res.json({ ok: true, module: mod });
 });
 
-const PutConfigSchema = z.object({
-  active: z.boolean().optional(),
-  config: z.record(z.any()).optional()
-});
-
 app.put("/api/modules/:name/config", requireDashboardKey, async (req, res) => {
-  const parsed = PutConfigSchema.safeParse(req.body ?? {});
-  if (!parsed.success) return res.status(400).json({ ok: false, error: "BAD_REQUEST" });
-
-  const name = req.params.name;
-  const updated = await putModuleConfig(name, parsed.data);
-  if (!updated) return res.status(404).json({ ok: false, error: "NOT_FOUND" });
-
-  await writeAudit({
-    actor: "dashboard",
-    action: "module.config.put",
-    target: name,
-    meta: { active: updated.active }
-  });
-
-  return res.json({ ok: true, module: updated });
+  const name = String(req.params.name);
+  if (!isKnownModule(name)) return res.status(404).json({ ok: false, error: "UNKNOWN_MODULE" });
+  const { active, config } = req.body ?? {};
+  const result = await setModuleConfig(name, { active, config }, "dashboard");
+  if (!result.ok) return res.status(400).json({ ok: false, error: result.error, details: result.details });
+  const mod = await getModule(name);
+  return res.json({ ok: true, module: mod });
 });
-
-const LockSchema = z.object({ reason: z.string().max(200).optional().default("") });
 
 app.post("/api/modules/:name/lock", requireDashboardKey, async (req, res) => {
-  const parsed = LockSchema.safeParse(req.body ?? {});
-  if (!parsed.success) return res.status(400).json({ ok: false, error: "BAD_REQUEST" });
-
-  const name = req.params.name;
-  const updated = await setModuleLock(name, { locked: true, reason: parsed.data.reason });
-  if (!updated) return res.status(404).json({ ok: false, error: "NOT_FOUND" });
-
-  await writeAudit({
-    actor: "dashboard",
-    action: "module.lock",
-    target: name,
-    meta: { reason: parsed.data.reason }
-  });
-
-  return res.json({ ok: true, module: updated });
+  const name = String(req.params.name);
+  const result = await lockModule(name, "dashboard");
+  if (!result.ok) return res.status(404).json({ ok: false, error: result.error });
+  const mod = await getModule(name);
+  return res.json({ ok: true, module: mod });
 });
 
 app.post("/api/modules/:name/unlock", requireDashboardKey, async (req, res) => {
-  const name = req.params.name;
-  const updated = await setModuleLock(name, { locked: false });
-  if (!updated) return res.status(404).json({ ok: false, error: "NOT_FOUND" });
-
-  await writeAudit({ actor: "dashboard", action: "module.unlock", target: name });
-  return res.json({ ok: true, module: updated });
+  const name = String(req.params.name);
+  const result = await unlockModule(name, "dashboard");
+  if (!result.ok) return res.status(404).json({ ok: false, error: result.error });
+  const mod = await getModule(name);
+  return res.json({ ok: true, module: mod });
 });
 
-// Internal (Bots → Gateway)
 app.post("/internal/register", requireInternalKey, async (req, res) => {
   const { service, version, meta } = req.body ?? {};
   if (!service || typeof service !== "string") {
     return res.status(400).json({ ok: false, error: "BAD_REQUEST" });
   }
-
   await registerService(service, { version, meta });
-  await writeAudit({
-    actor: "internal",
-    action: "service.register",
-    target: service,
-    meta: { version: version ?? "0.0.0" }
-  });
-
   return res.json({ ok: true });
 });
 
@@ -136,26 +85,25 @@ app.post("/internal/heartbeat", requireInternalKey, async (req, res) => {
   if (!service || typeof service !== "string") {
     return res.status(400).json({ ok: false, error: "BAD_REQUEST" });
   }
-
   const ok = await heartbeat(service);
   if (!ok) return res.status(404).json({ ok: false, error: "NOT_REGISTERED" });
   return res.json({ ok: true });
 });
 
+// Module state (Bots -> Gateway)
 app.get("/internal/module/:name", requireInternalKey, async (req, res) => {
-  const mod = await getModuleState(req.params.name);
-  if (!mod) return res.status(404).json({ ok: false, error: "NOT_FOUND" });
-
-  return res.json({
-    ok: true,
-    name: mod.name,
-    owner: mod.owner,
-    active: mod.active,
-    locked: mod.locked,
-    config: mod.config
-  });
+  const name = String(req.params.name);
+  const mod = await getModule(name);
+  if (!mod) return res.status(404).json({ ok: false, error: "UNKNOWN_MODULE" });
+  return res.json({ ok: true, ...mod });
 });
 
-app.listen(env.PORT, "0.0.0.0", () => {
+// Error boundary
+app.use((err, _req, res, _next) => {
+  console.error("[gateway] unhandled", err);
+  res.status(500).json({ ok: false, error: "INTERNAL_ERROR" });
+});
+
+app.listen(env.PORT, () => {
   console.log(`[gateway] listening on :${env.PORT}`);
 });

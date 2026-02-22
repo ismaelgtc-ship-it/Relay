@@ -1,48 +1,36 @@
-import { fetch } from "undici";
+import { request } from "undici";
 
-export async function gatewayRegister({ gatewayUrl, internalKey, version, meta } = {}) {
-  if (!gatewayUrl || !internalKey) return false;
-
-  const url = `${gatewayUrl.replace(/\/$/, "")}/internal/register`;
-  const res = await fetch(url, {
+export async function gatewayRegister({ gatewayUrl, internalKey, service, version, meta }) {
+  const res = await request(`${gatewayUrl}/internal/register`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      "x-internal-key": internalKey
+      "X-Internal-Key": internalKey
     },
-    body: JSON.stringify({ service: "realtime", version, meta })
+    body: JSON.stringify({ service, version, meta })
   });
-
-  return res.ok;
+  return res;
 }
 
-export async function gatewayHeartbeat({ gatewayUrl, internalKey } = {}) {
-  if (!gatewayUrl || !internalKey) return false;
-
-  const url = `${gatewayUrl.replace(/\/$/, "")}/internal/heartbeat`;
-  const res = await fetch(url, {
+export async function gatewayHeartbeat({ gatewayUrl, internalKey, service }) {
+  const res = await request(`${gatewayUrl}/internal/heartbeat`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      "x-internal-key": internalKey
+      "X-Internal-Key": internalKey
     },
-    body: JSON.stringify({ service: "realtime" })
+    body: JSON.stringify({ service })
   });
-
-  return res.ok;
+  return res;
 }
 
-export async function gatewayGetModule({ gatewayUrl, internalKey, name } = {}) {
-  if (!gatewayUrl || !internalKey) return null;
-
-  const url = `${gatewayUrl.replace(/\/$/, "")}/internal/module/${encodeURIComponent(name)}`;
-  const res = await fetch(url, {
+export async function gatewayGetModule({ gatewayUrl, internalKey, name }) {
+  const res = await request(`${gatewayUrl}/internal/module/${encodeURIComponent(name)}`, {
     method: "GET",
     headers: {
-      "x-internal-key": internalKey
+      "X-Internal-Key": internalKey
     }
   });
-
-  if (!res.ok) return null;
-  return await res.json();
+  const data = await res.body.json().catch(() => null);
+  return { statusCode: res.statusCode, data };
 }

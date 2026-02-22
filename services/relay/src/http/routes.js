@@ -38,26 +38,8 @@ export function createRoutes({ client }) {
       const u = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
       const { pathname } = u;
 
-      if (pathname === "/" || pathname === "/healthz" || pathname === "/health") {
-        return json(res, 200, { ok: true, service: "relay", version: env.SERVICE_VERSION, ts: new Date().toISOString() });
-      }
-
-      // Internal snapshot (Overseer puller)
-      if (pathname === "/internal/snapshot" && req.method === "GET") {
-        const secret = req.headers["x-relay-secret"];
-        if (!env.SNAPSHOT_API_KEY || typeof secret !== "string" || secret !== env.SNAPSHOT_API_KEY) {
-          return json(res, 401, { ok: false, error: "UNAUTHORIZED" });
-        }
-
-        const guildId = u.searchParams.get("guildId") || env.GUILD_ID;
-        if (!guildId) return json(res, 400, { ok: false, error: "BAD_REQUEST", detail: "missing guildId" });
-        if (!client) return json(res, 503, { ok: false, error: "NOT_READY" });
-
-        const guild = await client.guilds.fetch(guildId).catch(() => null);
-        if (!guild) return json(res, 404, { ok: false, error: "NOT_FOUND" });
-
-        const snapshot = await buildSnapshot(guild);
-        return json(res, 200, { ok: true, snapshot });
+      if (pathname === "/health") {
+        return json(res, 200, { status: "ok", service: "relay", version: env.SERVICE_VERSION });
       }
 
       // Snapshot API (used by Overseer puller)
