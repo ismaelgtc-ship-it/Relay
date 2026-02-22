@@ -17,7 +17,7 @@ export function startHttpServer({ client }) {
   return server;
 }
 
-// Compatibility export: some entrypoints import `createServer`.
+// Compatibility export (some earlier iterations imported `createServer`).
 export function createServer({ client }) {
   return startHttpServer({ client });
 }
