@@ -21,3 +21,6 @@ export function getDb() {
   }
   return db;
 }
+
+// Alias to prevent future import mismatches
+export const getMongoDb = getDb;
