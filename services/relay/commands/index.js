@@ -1,4 +1,4 @@
-import * as ping from "./ping.js";
+import ping from "./ping.js";
 
 export const commands = [ping];
 
@@ -8,5 +8,5 @@ export function loadCommands() {
 }
 
 export function getCommand(name) {
-  return commands.find((cmd) => cmd.data.name === name);
+  return commands.find((cmd) => cmd?.data?.name === name);
 }
