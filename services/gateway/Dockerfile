@@ -2,15 +2,12 @@ FROM node:20-slim
 
 WORKDIR /app
 
-ENV NODE_ENV=production \
-    YARN_NODE_LINKER=node-modules \
-    YARN_ENABLE_IMMUTABLE_INSTALLS=false \
-    YARN_ENABLE_GLOBAL_CACHE=true
+ENV NODE_ENV=production
 
-RUN corepack enable && corepack prepare yarn@4.6.0 --activate
+RUN corepack enable && corepack prepare yarn@1.22.22 --activate
 
 COPY package.json ./
-RUN yarn install --production --inline-builds
+RUN yarn install --production --non-interactive --network-timeout 600000
 
 COPY src ./src
 
