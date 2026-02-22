@@ -4,9 +4,10 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 
-# Deterministic installs for Render (use package-lock.json)
+# Deterministic, production-only install (Render-safe)
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev --no-audit --no-fund
+RUN npm ci --omit=dev --no-audit --no-fund \
+  && node --input-type=module -e "import('discord.js'); import('dotenv'); import('undici'); import('zod'); console.log('deps ok')"
 
 # Copy runtime sources
 COPY src ./src
