@@ -1,42 +1,37 @@
-import { Client, GatewayIntentBits, Partials, Events } from "discord.js";
-import { env } from "./env.js";
-import { gatewayRegister, gatewayHeartbeat } from "./gatewayClient.js";
-import { startHttpServer } from "./http/server.js";
-import { startSnapshotLoop } from "./snapshot/runner.js";
+import { Client, GatewayIntentBits, REST, Routes } from "discord.js";
+import { loadCommands } from "./commands/index.js";
+import { handleInteraction } from "./interactions/handler.js";
+import dotenv from "dotenv";
 
-console.log("[relay] boot", { version: env.SERVICE_VERSION });
-
-const intents = [GatewayIntentBits.Guilds];
-if (env.ENABLE_GUILD_MESSAGES) intents.push(GatewayIntentBits.GuildMessages);
-if (env.ENABLE_MESSAGE_CONTENT) intents.push(GatewayIntentBits.MessageContent);
+dotenv.config();
 
 const client = new Client({
-  intents,
-  partials: [Partials.Channel]
+  intents: [GatewayIntentBits.Guilds]
 });
 
-// Always start HTTP server (health + optional snapshot API)
-startHttpServer({ client });
+const TOKEN = process.env.DISCORD_TOKEN;
+const CLIENT_ID = process.env.CLIENT_ID;
 
-client.once(Events.ClientReady, async () => {
-  console.log("[relay] ready", { user: client.user?.tag });
+client.once("ready", async () => {
+  console.log(`[relay] Logged in as ${client.user.tag}`);
 
-  // Optional: periodic snapshots for Overseer to pull
-  startSnapshotLoop({ client });
+  const commands = loadCommands();
 
-  // Optional: register with gateway (Overseer)
-  const canGateway = Boolean(env.GATEWAY_URL) && Boolean(env.INTERNAL_API_KEY);
-  if (!canGateway) {
-    console.log("[relay] gateway disabled (no GATEWAY_URL / INTERNAL_API_KEY)");
-    return;
+  const rest = new REST({ version: "10" }).setToken(TOKEN);
+
+  try {
+    await rest.put(
+      Routes.applicationCommands(CLIENT_ID),
+      { body: commands }
+    );
+    console.log("[relay] Slash commands registered.");
+  } catch (err) {
+    console.error("Command registration error:", err);
   }
-
-  const ok = await gatewayRegister({ url: env.GATEWAY_URL, apiKey: env.INTERNAL_API_KEY });
-  console.log("[relay] gatewayRegister", { ok });
-
-  setInterval(() => {
-    gatewayHeartbeat({ url: env.GATEWAY_URL, apiKey: env.INTERNAL_API_KEY }).catch(() => {});
-  }, 30_000);
 });
 
-client.login(env.DISCORD_TOKEN);
+client.on("interactionCreate", async (interaction) => {
+  await handleInteraction(interaction);
+});
+
+client.login(TOKEN);
