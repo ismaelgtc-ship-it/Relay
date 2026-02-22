@@ -9,7 +9,9 @@ WORKDIR /app
 
 # Install production deps for the gateway service
 COPY package.json package-lock.json* ./
-RUN if [ -f package-lock.json ]; then npm ci --omit=dev; else npm i --omit=dev; fi
+# NOTE: Render Docker builds may hit an npm bug with `npm ci` ("Exit handler never called!").
+# Use `npm install` for a robust production install.
+RUN npm install --omit=dev --no-audit --no-fund
 
 # Copy runtime sources (do not copy node_modules)
 COPY src ./src
