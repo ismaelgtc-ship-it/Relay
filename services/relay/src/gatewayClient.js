@@ -1,8 +1,20 @@
 import { request } from "undici";
 import { env } from "./env.js";
 
+function baseUrl() {
+  return env.GATEWAY_URL ? new URL(env.GATEWAY_URL).toString() : "";
+}
+
 function url(path) {
-  return new URL(path, env.GATEWAY_URL).toString();
+  return new URL(path, baseUrl()).toString();
+}
+
+async function readJsonSafe(res) {
+  try {
+    return await res.body.json();
+  } catch {
+    return {};
+  }
 }
 
 export async function gatewayRegister() {
@@ -18,8 +30,11 @@ export async function gatewayRegister() {
       meta: { platform: "render" }
     })
   });
-  const json = await res.body.json().catch(() => ({}));
-  if (res.statusCode >= 400) throw new Error(`gateway register failed: ${res.statusCode} ${JSON.stringify(json)}`);
+
+  const json = await readJsonSafe(res);
+  if (res.statusCode >= 400) {
+    throw new Error(`gateway register failed: ${res.statusCode} ${JSON.stringify(json)}`);
+  }
   return json;
 }
 
@@ -32,7 +47,10 @@ export async function gatewayHeartbeat() {
     },
     body: JSON.stringify({ service: "relay" })
   });
-  const json = await res.body.json().catch(() => ({}));
-  if (res.statusCode >= 400) throw new Error(`gateway heartbeat failed: ${res.statusCode} ${JSON.stringify(json)}`);
+
+  const json = await readJsonSafe(res);
+  if (res.statusCode >= 400) {
+    throw new Error(`gateway heartbeat failed: ${res.statusCode} ${JSON.stringify(json)}`);
+  }
   return json;
 }
