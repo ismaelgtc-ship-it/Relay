@@ -1,56 +1,28 @@
-import { request } from "undici";
-import { env } from "./env.js";
+import { fetch } from "undici";
 
-function baseUrl() {
-  return env.GATEWAY_URL ? new URL(env.GATEWAY_URL).toString() : "";
-}
+const GATEWAY_URL = process.env.GATEWAY_URL;
+const INTERNAL_KEY = process.env.INTERNAL_API_KEY;
 
-function url(path) {
-  return new URL(path, baseUrl()).toString();
-}
+async function request(path) {
+  if (!GATEWAY_URL || !INTERNAL_KEY) return;
 
-async function readJsonSafe(res) {
   try {
-    return await res.body.json();
-  } catch {
-    return {};
+    await fetch(`${GATEWAY_URL}${path}`, {
+      method: "POST",
+      headers: {
+        "x-internal-key": INTERNAL_KEY
+      }
+    });
+  } catch (err) {
+    console.error("[relay] gateway error", err.message);
   }
 }
 
 export async function gatewayRegister() {
-  const res = await request(url("/internal/register"), {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-internal-key": env.INTERNAL_API_KEY
-    },
-    body: JSON.stringify({
-      service: "relay",
-      version: env.SERVICE_VERSION,
-      meta: { platform: "render" }
-    })
-  });
-
-  const json = await readJsonSafe(res);
-  if (res.statusCode >= 400) {
-    throw new Error(`gateway register failed: ${res.statusCode} ${JSON.stringify(json)}`);
-  }
-  return json;
+  await request("/register");
+  console.log("[relay] registered with overseer");
 }
 
 export async function gatewayHeartbeat() {
-  const res = await request(url("/internal/heartbeat"), {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-internal-key": env.INTERNAL_API_KEY
-    },
-    body: JSON.stringify({ service: "relay" })
-  });
-
-  const json = await readJsonSafe(res);
-  if (res.statusCode >= 400) {
-    throw new Error(`gateway heartbeat failed: ${res.statusCode} ${JSON.stringify(json)}`);
-  }
-  return json;
+  await request("/heartbeat");
 }
