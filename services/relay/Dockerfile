@@ -2,14 +2,13 @@ FROM node:20-slim
 
 WORKDIR /app
 
-# Render has shown intermittent npm (10/11) failures during long dependency installs
+# Render has shown intermittent npm failures during long dependency installs
 # ("Exit handler never called!"), causing incomplete node_modules and runtime crashes.
-# Definitive mitigation: use Yarn Classic (via Corepack) with node_modules.
+# We avoid npm during image build and use Yarn Classic (1.x), which is stable for
+# production-only installs and does not require a lockfile.
 
 ENV NODE_ENV=production
 
-# Yarn Berry (v2+) deprecates --production on install and can fail builds depending
-# on config. We pin Yarn Classic for maximum compatibility and stability.
 RUN corepack enable && corepack prepare yarn@1.22.22 --activate
 
 # Install production deps for the relay service (Render build context = services/relay)

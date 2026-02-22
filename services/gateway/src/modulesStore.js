@@ -29,7 +29,8 @@ function validateMirrorConfig(config) {
     const langsInGroup = new Set();
     for (const [channelId, langRaw] of Object.entries(g.channels ?? {})) {
       const lang = String(langRaw).toUpperCase();
-      if (!/^[A-Z]{2,5}i.test(String(lang))) return { ok: false, error: "INVALID_LANGUAGE", details: { channelId, lang } };
+      // Accept 2-5 letter language codes (e.g., EN, ES, PT, DE).
+      if (!/^[A-Z]{2,5}$/.test(lang)) return { ok: false, error: "INVALID_LANGUAGE", details: { channelId, lang } };
       if (seenChannels.has(channelId)) return { ok: false, error: "DUPLICATE_CHANNEL", details: { channelId } };
       if (langsInGroup.has(lang)) return { ok: false, error: "DUPLICATE_LANGUAGE", details: { group: g.name, lang } };
       seenChannels.add(channelId);
