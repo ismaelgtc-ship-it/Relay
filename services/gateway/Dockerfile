@@ -4,7 +4,7 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 
-# Deterministic installs for Render (use package-lock.json)
+# Deterministic installs on Render using the lockfile.
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund
 
