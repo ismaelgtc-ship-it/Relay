@@ -1,19 +1,29 @@
-FROM node:20-alpine
-
-# Render setup (per-service Docker build context):
-# - Root Directory: services/relay
-# - Dockerfile Path: services/relay/Dockerfile
-# - Docker Build Context Directory: services/relay
+FROM node:20-slim
 
 WORKDIR /app
 
-# Install production deps for the relay service
-COPY package.json package-lock.json* ./
-# NOTE: Render Docker builds may hit an npm bug with `npm ci` ("Exit handler never called!").
-# Use `npm install` for a robust production install.
-RUN npm install --omit=dev --no-audit --no-fund
+# Improve npm stability in containerized CI builds
+ENV NPM_CONFIG_UPDATE_NOTIFIER=false \
+    NPM_CONFIG_FUND=false \
+    NPM_CONFIG_AUDIT=false \
+    NPM_CONFIG_PROGRESS=false
 
-# Copy runtime sources (do not copy node_modules)
+# Pin npm to a stable version (avoids sporadic "Exit handler never called!" issues)
+RUN npm -v && npm install -g npm@10.9.2
+
+# Install production deps for the relay service (Render build context = services/relay)
+COPY package.json package-lock.json* ./
+
+# Retry to handle transient registry/network hiccups
+RUN set -eux; \
+  for i in 1 2 3; do \
+    npm ci --omit=dev --no-audit --no-fund && break; \
+    echo "npm ci failed (attempt $i/3)"; \
+    npm cache clean --force || true; \
+    sleep 3; \
+  done
+
+# Copy runtime sources (never copy node_modules)
 COPY src ./src
 COPY commands ./commands
 COPY interactions ./interactions
