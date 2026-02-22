@@ -1,47 +1,42 @@
-import { Client, GatewayIntentBits, REST, Routes } from "discord.js";
-import { loadCommands } from "./commands/index.js";
-// NOTE: interactions live at /services/relay/interactions (sibling of /src)
-// so we import one level up.
-import { handleInteraction } from "../interactions/handler.js";
-import { createServer } from "./http/server.js";
-import dotenv from "dotenv";
+import { Client, GatewayIntentBits, Partials, Events } from "discord.js";
+import { env } from "./env.js";
+import { gatewayRegister, gatewayHeartbeat } from "./gatewayClient.js";
+import { startHttpServer } from "./http/server.js";
+import { startSnapshotLoop } from "./snapshot/runner.js";
 
-dotenv.config();
+console.log("[relay] boot", { version: env.SERVICE_VERSION });
 
-// Render Web Service readiness: bind an HTTP server to $PORT.
-// If you run this as a Background Worker, this still doesn't hurt.
-const PORT = Number(process.env.PORT || 10000);
-createServer().listen(PORT, "0.0.0.0", () => {
-  console.log(`[relay] health server listening on :${PORT}`);
-});
+const intents = [GatewayIntentBits.Guilds];
+if (env.ENABLE_GUILD_MESSAGES) intents.push(GatewayIntentBits.GuildMessages);
+if (env.ENABLE_MESSAGE_CONTENT) intents.push(GatewayIntentBits.MessageContent);
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds]
+  intents,
+  partials: [Partials.Channel]
 });
 
-const TOKEN = process.env.DISCORD_TOKEN;
-const CLIENT_ID = process.env.CLIENT_ID;
+// Always start HTTP server (health + optional snapshot API)
+startHttpServer({ client });
 
-client.once("ready", async () => {
-  console.log(`[relay] Logged in as ${client.user.tag}`);
+client.once(Events.ClientReady, async () => {
+  console.log("[relay] ready", { user: client.user?.tag });
 
-  const commands = loadCommands();
+  // Optional: periodic snapshots for Overseer to pull
+  startSnapshotLoop({ client });
 
-  const rest = new REST({ version: "10" }).setToken(TOKEN);
-
-  try {
-    await rest.put(
-      Routes.applicationCommands(CLIENT_ID),
-      { body: commands }
-    );
-    console.log("[relay] Slash commands registered.");
-  } catch (err) {
-    console.error("Command registration error:", err);
+  // Optional: register with gateway (Overseer)
+  const canGateway = Boolean(env.GATEWAY_URL) && Boolean(env.INTERNAL_API_KEY);
+  if (!canGateway) {
+    console.log("[relay] gateway disabled (no GATEWAY_URL / INTERNAL_API_KEY)");
+    return;
   }
+
+  const ok = await gatewayRegister({ url: env.GATEWAY_URL, apiKey: env.INTERNAL_API_KEY });
+  console.log("[relay] gatewayRegister", { ok });
+
+  setInterval(() => {
+    gatewayHeartbeat({ url: env.GATEWAY_URL, apiKey: env.INTERNAL_API_KEY }).catch(() => {});
+  }, 30_000);
 });
 
-client.on("interactionCreate", async (interaction) => {
-  await handleInteraction(interaction);
-});
-
-client.login(TOKEN);
+client.login(env.DISCORD_TOKEN);
