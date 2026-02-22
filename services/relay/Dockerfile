@@ -1,18 +1,18 @@
-FROM node:20-slim
+# syntax=docker/dockerfile:1
 
+FROM node:20-slim AS deps
 WORKDIR /app
 
-ENV NODE_ENV=production
-
-# Deterministic, production-only install (Render-safe)
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund \
-  && node --input-type=module -e "import('discord.js'); import('dotenv'); import('undici'); import('zod'); console.log('deps ok')"
+  && node -e "import('discord.js').then(()=>process.exit(0)).catch(()=>process.exit(1))"
 
-# Copy runtime sources
+FROM node:20-slim AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+
+COPY --from=deps /app/node_modules ./node_modules
+COPY package.json package-lock.json ./
 COPY src ./src
-COPY commands ./commands
-COPY interactions ./interactions
-COPY index.js ./index.js
 
 CMD ["node", "src/index.js"]
