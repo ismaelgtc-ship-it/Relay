@@ -2,7 +2,9 @@
   "name": "relay",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "node src/index.js",
     "start": "node src/index.js"
@@ -11,6 +13,7 @@
     "discord.js": "^14.16.3",
     "dotenv": "^16.4.5",
     "undici": "^6.19.8",
-    "zod": "^3.23.8"
+    "zod": "^3.23.8",
+    "mongodb": "^6.21.0"
   }
 }
