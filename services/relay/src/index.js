@@ -70,10 +70,15 @@ client.once(Events.ClientReady, async () => {
   console.log(`[relay] logged in as ${client.user?.tag ?? "unknown"}`);
 
   // Presence
-  await client.user?.setPresence({
-    activities: [{ name: "Relaying translations • Live Service" }],
-    status: "online"
-  }).catch(() => null);
+  try {
+    // discord.js v14: setPresence is synchronous and does not return a Promise
+    client.user?.setPresence({
+      activities: [{ name: "Relaying translations • Live Service" }],
+      status: "online"
+    });
+  } catch {
+    // ignore presence failures
+  }
 
   // Register in Gateway
   await gatewayRegister({
