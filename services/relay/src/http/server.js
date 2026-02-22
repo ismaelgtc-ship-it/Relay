@@ -7,7 +7,8 @@ import { createRoutes } from "./routes.js";
  * Always exposes /health. Snapshot endpoints are gated by SNAPSHOT_API_KEY.
  */
 export function startHttpServer({ client }) {
-  const server = createServer({ client });
+  const routes = createRoutes({ client });
+  const server = http.createServer(routes);
 
   server.listen(env.PORT, () => {
     console.log(`[relay] health server listening on :${env.PORT}`);
@@ -16,11 +17,7 @@ export function startHttpServer({ client }) {
   return server;
 }
 
-/**
- * Backwards-compatible factory.
- * Some deployments import { createServer } from "./http/server.js".
- */
-export function createServer({ client } = {}) {
-  const routes = createRoutes({ client });
-  return http.createServer(routes);
+// Compatibility export: some entrypoints import `createServer`.
+export function createServer({ client }) {
+  return startHttpServer({ client });
 }
