@@ -1,9 +1,17 @@
 FROM node:20-alpine
 
-WORKDIR /app
-COPY package.json ./
-RUN npm install --omit=dev --no-audit --no-fund
+# IMPORTANT (Render Docker): builds often run with repo root as build context.
+# This Dockerfile is written to work with build context = "." (repo root).
 
-COPY . .
+WORKDIR /app
+
+# Install production deps for relay service
+COPY services/relay/package.json services/relay/package-lock.json* ./
+RUN if [ -f package-lock.json ]; then npm ci --omit=dev; else npm i --omit=dev; fi
+
+# Copy relay sources + shared packages (if any)
+COPY services/relay ./
+COPY packages ./packages
+
 ENV NODE_ENV=production
 CMD ["node", "src/index.js"]
