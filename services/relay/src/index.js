@@ -1,6 +1,8 @@
 import { Client, GatewayIntentBits, REST, Routes } from "discord.js";
 import { loadCommands } from "./commands/index.js";
-import { handleInteraction } from "./interactions/handler.js";
+// NOTE: interactions live at /services/relay/interactions (sibling of /src)
+// so we import one level up.
+import { handleInteraction } from "../interactions/handler.js";
 import dotenv from "dotenv";
 
 dotenv.config();
