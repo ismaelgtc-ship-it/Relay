@@ -1,66 +1,42 @@
-import { Client, GatewayIntentBits, Events } from "discord.js";
-import http from "node:http";
+import { Client, GatewayIntentBits, Partials, Events } from "discord.js";
 import { env } from "./env.js";
 import { gatewayRegister, gatewayHeartbeat } from "./gatewayClient.js";
+import { startHttpServer } from "./http/server.js";
+import { startSnapshotLoop } from "./snapshot/runner.js";
 
-/**
- * Render (Free) Web Service health checks require an HTTP listener.
- * Keep it lightweight and always-on.
- */
-const server = http.createServer((req, res) => {
-  const url = req.url ?? "/";
-  if (url === "/healthz" || url === "/") {
-    res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ status: "ok", service: "relay" }));
-    return;
-  }
-  res.writeHead(404, { "content-type": "application/json" });
-  res.end(JSON.stringify({ status: "not_found" }));
-});
+console.log("[relay] boot", { version: env.SERVICE_VERSION });
 
-server.listen(env.PORT, "0.0.0.0", () => {
-  console.log(`[relay] health server listening on :${env.PORT}`);
-});
-
-/**
- * Intents:
- * - Default is SAFE (Guilds only) to avoid "Used disallowed intents".
- * - Enable extras via env flags.
- */
 const intents = [GatewayIntentBits.Guilds];
-
 if (env.ENABLE_GUILD_MESSAGES) intents.push(GatewayIntentBits.GuildMessages);
 if (env.ENABLE_MESSAGE_CONTENT) intents.push(GatewayIntentBits.MessageContent);
 
-const client = new Client({ intents });
+const client = new Client({
+  intents,
+  partials: [Partials.Channel]
+});
+
+// Always start HTTP server (health + optional snapshot API)
+startHttpServer({ client });
 
 client.once(Events.ClientReady, async () => {
-  console.log(`[relay] logged in as ${client.user?.tag ?? "unknown"}`);
+  console.log("[relay] ready", { user: client.user?.tag });
 
-  const hasGateway = Boolean(env.GATEWAY_URL) && Boolean(env.INTERNAL_API_KEY);
+  // Optional: periodic snapshots for Overseer to pull
+  startSnapshotLoop({ client });
 
-  if (!hasGateway) {
+  // Optional: register with gateway (Overseer)
+  const canGateway = Boolean(env.GATEWAY_URL) && Boolean(env.INTERNAL_API_KEY);
+  if (!canGateway) {
     console.log("[relay] gateway disabled (no GATEWAY_URL / INTERNAL_API_KEY)");
     return;
   }
 
-  // Never crash the process due to gateway connectivity issues.
-  try {
-    await gatewayRegister();
-    console.log("[relay] gateway registered");
-  } catch (err) {
-    console.error("[relay] gateway register failed (continuing without gateway):", err);
-    return;
-  }
+  const ok = await gatewayRegister({ url: env.GATEWAY_URL, apiKey: env.INTERNAL_API_KEY });
+  console.log("[relay] gatewayRegister", { ok });
 
   setInterval(() => {
-    gatewayHeartbeat()
-      .then(() => console.log("[relay] gateway heartbeat ok"))
-      .catch((err) => console.error("[relay] gateway heartbeat error", err));
+    gatewayHeartbeat({ url: env.GATEWAY_URL, apiKey: env.INTERNAL_API_KEY }).catch(() => {});
   }, 30_000);
 });
 
-client.login(env.DISCORD_TOKEN).catch((err) => {
-  console.error("[relay] discord login failed:", err);
-  process.exitCode = 1;
-});
+client.login(env.DISCORD_TOKEN);
