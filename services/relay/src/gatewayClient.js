@@ -1,28 +1,48 @@
 import { fetch } from "undici";
 
-const GATEWAY_URL = process.env.GATEWAY_URL;
-const INTERNAL_KEY = process.env.INTERNAL_API_KEY;
+export async function gatewayRegister({ gatewayUrl, internalKey, version, meta } = {}) {
+  if (!gatewayUrl || !internalKey) return false;
 
-async function request(path) {
-  if (!GATEWAY_URL || !INTERNAL_KEY) return;
+  const url = `${gatewayUrl.replace(/\/$/, "")}/internal/register`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-internal-key": internalKey
+    },
+    body: JSON.stringify({ service: "realtime", version, meta })
+  });
 
-  try {
-    await fetch(`${GATEWAY_URL}${path}`, {
-      method: "POST",
-      headers: {
-        "x-internal-key": INTERNAL_KEY
-      }
-    });
-  } catch (err) {
-    console.error("[relay] gateway error", err.message);
-  }
+  return res.ok;
 }
 
-export async function gatewayRegister() {
-  await request("/register");
-  console.log("[relay] registered with overseer");
+export async function gatewayHeartbeat({ gatewayUrl, internalKey } = {}) {
+  if (!gatewayUrl || !internalKey) return false;
+
+  const url = `${gatewayUrl.replace(/\/$/, "")}/internal/heartbeat`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-internal-key": internalKey
+    },
+    body: JSON.stringify({ service: "realtime" })
+  });
+
+  return res.ok;
 }
 
-export async function gatewayHeartbeat() {
-  await request("/heartbeat");
+export async function gatewayGetModule({ gatewayUrl, internalKey, name } = {}) {
+  if (!gatewayUrl || !internalKey) return null;
+
+  const url = `${gatewayUrl.replace(/\/$/, "")}/internal/module/${encodeURIComponent(name)}`;
+  const res = await fetch(url, {
+    method: "GET",
+    headers: {
+      "x-internal-key": internalKey
+    }
+  });
+
+  if (!res.ok) return null;
+  return await res.json();
 }
