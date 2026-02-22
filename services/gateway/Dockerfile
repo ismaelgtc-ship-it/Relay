@@ -2,22 +2,16 @@ FROM node:20-slim
 
 WORKDIR /app
 
-ENV NPM_CONFIG_UPDATE_NOTIFIER=false \
-    NPM_CONFIG_FUND=false \
-    NPM_CONFIG_AUDIT=false \
-    NPM_CONFIG_PROGRESS=false
+ENV NODE_ENV=production \
+    YARN_NODE_LINKER=node-modules \
+    YARN_ENABLE_IMMUTABLE_INSTALLS=false \
+    YARN_ENABLE_GLOBAL_CACHE=true
 
-RUN npm -v && npm install -g npm@11.10.1
+RUN corepack enable && corepack prepare yarn@4.6.0 --activate
 
-COPY package.json package-lock.json* ./
-
-RUN set -eux; \
-  npm config set fetch-retries 5; \
-  npm config set fetch-retry-mintimeout 20000; \
-  npm config set fetch-retry-maxtimeout 120000; \
-  npm ci --omit=dev --no-audit --no-fund
+COPY package.json ./
+RUN yarn install --production --inline-builds
 
 COPY src ./src
 
-ENV NODE_ENV=production
 CMD ["node", "src/server.js"]
