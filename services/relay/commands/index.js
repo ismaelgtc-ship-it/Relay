@@ -1,11 +1,12 @@
-import ping from "./ping.js";
+import * as ping from "./ping.js";
 
-export const commandRegistry = new Map();
+export const commands = [ping];
 
+// Compatibility export: some bootstraps import `loadCommands`.
 export function loadCommands() {
-  const commands = [ping];
-  for (const cmd of commands) {
-    commandRegistry.set(cmd.data.name, cmd);
-  }
-  return commands.map(c => c.data);
+  return commands;
+}
+
+export function getCommand(name) {
+  return commands.find((cmd) => cmd.data.name === name);
 }
