@@ -1,5 +1,5 @@
 import { SlashCommandBuilder, ActionRowBuilder, StringSelectMenuBuilder } from "discord.js";
-import { fetchMirrorModule, saveMirrorConfig, normalizeGroups } from "./_mirrorStore.js";
+import { fetchMirrorModule, saveMirrorConfig, normalizeGroups, formatMirrorSaveError } from "./_mirrorStore.js";
 
 export default {
   data: new SlashCommandBuilder().setName("remove_channel").setDescription("➖ Remove a channel from a Mirror group"),
@@ -13,9 +13,12 @@ export default {
     const menu = new StringSelectMenuBuilder()
       .setCustomId("mirror:remove_channel:group")
       .setPlaceholder("Select a group")
-      .addOptions(groups.slice(0,25).map((g)=>({ label: g.name, value: g.name })));
+      .addOptions(groups.slice(0, 25).map((g) => ({ label: g.name, value: g.name })));
 
-    await interaction.editReply({ content: "Choose a group:", components: [new ActionRowBuilder().addComponents(menu)] });
+    await interaction.editReply({
+      content: "Choose a group:",
+      components: [new ActionRowBuilder().addComponents(menu)]
+    });
   },
 
   async handleComponent(interaction) {
@@ -25,8 +28,9 @@ export default {
       const mod = await fetchMirrorModule();
       const cfg = mod?.config || {};
       const groups = normalizeGroups(cfg);
-      const g = groups.find((x)=>x.name===group);
+      const g = groups.find((x) => x.name === group);
       const channels = Object.keys(g?.channels || {});
+
       if (!channels.length) {
         await interaction.editReply({ content: "This group has no channels.", components: [] });
         return true;
@@ -35,9 +39,17 @@ export default {
       const chMenu = new StringSelectMenuBuilder()
         .setCustomId(`mirror:remove_channel:channel:${group}`)
         .setPlaceholder("Select a channel")
-        .addOptions(channels.slice(0,25).map((id)=>({ label: id, value: id, description: `#${id}` })));
+        .addOptions(
+          channels.slice(0, 25).map((id) => ({
+            label: interaction.guild?.channels?.cache?.get(id)?.name ? `#${interaction.guild.channels.cache.get(id).name}` : id,
+            value: id
+          }))
+        );
 
-      await interaction.editReply({ content: `Group: **${group}**\nSelect a channel to remove:`, components: [new ActionRowBuilder().addComponents(chMenu)] });
+      await interaction.editReply({
+        content: `Group: **${group}**\nSelect a channel to remove:`,
+        components: [new ActionRowBuilder().addComponents(chMenu)]
+      });
       return true;
     }
 
@@ -49,11 +61,18 @@ export default {
       const mod = await fetchMirrorModule();
       const cfg = mod?.config || {};
       const groups = normalizeGroups(cfg);
-      const g = groups.find((x)=>x.name===group);
+      const g = groups.find((x) => x.name === group);
       if (!g) return true;
+
       delete g.channels[channelId];
 
-      await saveMirrorConfig({ active: true, config: { ...cfg, groups } });
+      const res = await saveMirrorConfig({ active: true, config: { ...cfg, groups } });
+      if (!res.ok) {
+        console.error("[mirror] remove_channel save failed", { statusCode: res.statusCode, data: res.data });
+        await interaction.editReply({ content: `Failed to save mirror configuration. ${formatMirrorSaveError(res)}`, components: [] });
+        return true;
+      }
+
       await interaction.editReply({ content: `Removed <#${channelId}> from **${group}**`, components: [] });
       return true;
     }

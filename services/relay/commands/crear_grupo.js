@@ -1,5 +1,5 @@
 import { SlashCommandBuilder } from "discord.js";
-import { fetchMirrorModule, saveMirrorConfig, normalizeGroups } from "./_mirrorStore.js";
+import { fetchMirrorModule, saveMirrorConfig, normalizeGroups, formatMirrorSaveError } from "./_mirrorStore.js";
 
 export default {
   data: new SlashCommandBuilder()
@@ -8,6 +8,7 @@ export default {
     .addStringOption((o) => o.setName("name").setDescription("Group name").setRequired(true)),
   async execute(interaction) {
     await interaction.deferReply({ ephemeral: true });
+
     const name = interaction.options.getString("name", true).trim();
     const mod = await fetchMirrorModule();
     const cfg = mod?.config || {};
@@ -19,7 +20,12 @@ export default {
 
     groups.push({ name, channels: {} });
     const res = await saveMirrorConfig({ active: true, config: { ...cfg, groups } });
-    if (!res.ok) return interaction.editReply({ content: "Failed to save mirror configuration." });
+
+    if (!res.ok) {
+      console.error("[mirror] create_group save failed", { statusCode: res.statusCode, data: res.data });
+      return interaction.editReply({ content: `Failed to save mirror configuration. ${formatMirrorSaveError(res)}` });
+    }
+
     return interaction.editReply({ content: `Group created: **${name}**` });
   }
 };

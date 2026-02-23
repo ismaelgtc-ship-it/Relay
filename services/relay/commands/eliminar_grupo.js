@@ -1,5 +1,5 @@
 import { SlashCommandBuilder, ActionRowBuilder, StringSelectMenuBuilder } from "discord.js";
-import { fetchMirrorModule, saveMirrorConfig, normalizeGroups } from "./_mirrorStore.js";
+import { fetchMirrorModule, saveMirrorConfig, normalizeGroups, formatMirrorSaveError } from "./_mirrorStore.js";
 
 export default {
   data: new SlashCommandBuilder().setName("delete_group").setDescription("🗑️ Delete a Mirror group"),
@@ -29,7 +29,16 @@ export default {
     const cfg = mod?.config || {};
     const groups = normalizeGroups(cfg).filter((g) => g.name !== target);
 
-    await saveMirrorConfig({ active: true, config: { ...cfg, groups } });
+    const res = await saveMirrorConfig({ active: true, config: { ...cfg, groups } });
+    if (!res.ok) {
+      console.error("[mirror] delete_group save failed", { statusCode: res.statusCode, data: res.data });
+      await interaction.editReply({
+        content: `Failed to save mirror configuration. ${formatMirrorSaveError(res)}`,
+        components: []
+      });
+      return true;
+    }
+
     await interaction.editReply({ content: `Group deleted: **${target}**`, components: [] });
     return true;
   }
