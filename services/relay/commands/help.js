@@ -1,17 +1,17 @@
 import { SlashCommandBuilder, EmbedBuilder } from "discord.js";
 
 export default {
-  data: new SlashCommandBuilder().setName("help").setDescription("Lista comandos Devilwolf"),
+  data: new SlashCommandBuilder().setName("help").setDescription("ℹ️ List Devilwolf commands"),
   async execute(interaction) {
     const embed = new EmbedBuilder()
-      .setTitle("Devilwolf • Comandos")
+      .setTitle("Devilwolf • Commands")
       .setDescription([
-        "`/crear_grupo` ` /eliminar_grupo` ` /añadir_canal` ` /remover_canal` ` /list` ` /limpiar`",
-        "`/save_config` ` /load_config` ` /wipe_config`",
-        "`/select_language` ` /select_language_edit`",
-        "`/remove_rol`",
+        "`/create_group` ` /delete_group` ` /add_channel` ` /remove_channel` ` /mirror_list` ` /mirror_clear`",
+        "`/mirror_export` ` /mirror_import` ` /mirror_reset`",
+        "`/set_language` ` /language_panel`",
+        "`/remove_role`",
         "`/ocr`",
-        "Context menu: `TRANSLATE` (clic derecho en un mensaje)"
+        "Context menu: `Translate` (right-click a message)"
       ].join("\n"));
     await interaction.reply({ embeds: [embed], ephemeral: true });
   }

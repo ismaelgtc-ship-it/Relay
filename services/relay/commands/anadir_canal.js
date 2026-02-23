@@ -4,24 +4,30 @@ import { SlashCommandBuilder, ChannelType, PermissionFlagsBits } from "discord.j
 // Command name must be ASCII; Discord does not accept "ñ" in command names.
 export default {
   data: new SlashCommandBuilder()
-    .setName("anadir_canal")
-    .setDescription("Añade un canal a un grupo de Mirror (config en Gateway).")
-    .addStringOption(o => o.setName("grupo").setDescription("Nombre del grupo").setRequired(true))
-    .addChannelOption(o => o.setName("canal").setDescription("Canal a añadir").addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement).setRequired(true))
-    .addStringOption(o => o.setName("idioma").setDescription("Idioma (ej: ES, EN)").setRequired(true))
+    .setName("add_channel")
+    .setDescription("🪞 Add a channel to a Mirror group (stored in Gateway).")
+    .addStringOption((o) => o.setName("group").setDescription("Group name").setRequired(true))
+    .addChannelOption((o) =>
+      o
+        .setName("channel")
+        .setDescription("Channel to add")
+        .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+        .setRequired(true)
+    )
+    .addStringOption((o) => o.setName("lang").setDescription("Language (e.g. ES, EN)").setRequired(true))
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
 
   async execute(interaction, ctx = {}) {
-    const groupName = interaction.options.getString("grupo", true).trim();
-    const channel = interaction.options.getChannel("canal", true);
-    const lang = interaction.options.getString("idioma", true).trim().toUpperCase();
+    const groupName = interaction.options.getString("group", true).trim();
+    const channel = interaction.options.getChannel("channel", true);
+    const lang = interaction.options.getString("lang", true).trim().toUpperCase();
 
     // Gateway module schema: { groups: [{ name, channels: { [channelId]: "ES" } }] }
     const gatewayUrl = process.env.GATEWAY_URL;
     const internalKey = process.env.INTERNAL_API_KEY || process.env.INTERNAL_KEY;
 
     if (!gatewayUrl || !internalKey) {
-      await interaction.reply({ content: "❌ Falta GATEWAY_URL o INTERNAL_API_KEY en Relay.", ephemeral: true });
+      await interaction.reply({ content: "❌ Missing GATEWAY_URL or INTERNAL_API_KEY in Relay.", ephemeral: true });
       return;
     }
 
@@ -36,7 +42,7 @@ export default {
 
     if (getRes.statusCode >= 400) {
       const body = await getRes.body.text();
-      await interaction.editReply(`❌ Gateway error leyendo mirror: ${getRes.statusCode} ${body}`);
+      await interaction.editReply(`❌ Gateway error reading mirror config: ${getRes.statusCode} ${body}`);
       return;
     }
 
@@ -66,10 +72,12 @@ export default {
 
     if (putRes.statusCode >= 400) {
       const body = await putRes.body.text();
-      await interaction.editReply(`❌ Gateway error guardando mirror: ${putRes.statusCode} ${body}`);
+      await interaction.editReply(`❌ Gateway error saving mirror config: ${putRes.statusCode} ${body}`);
       return;
     }
 
-    await interaction.editReply(`✅ Canal <#${channel.id}> añadido al grupo **${groupName}** con idioma **${lang}**.`);
+    await interaction.editReply(
+      `✅ Added <#${channel.id}> to **${groupName}** with language **${lang}**.`
+    );
   }
 };

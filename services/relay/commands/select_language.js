@@ -22,9 +22,9 @@ function rows() {
 }
 
 export default {
-  data: new SlashCommandBuilder().setName("select_language").setDescription("Publica botones de selección de idioma"),
+  data: new SlashCommandBuilder().setName("set_language").setDescription("🌍 Publish language selection buttons"),
   async execute(interaction) {
-    await interaction.reply({ content: "Selecciona tu idioma preferido:", components: rows(), ephemeral: false });
+    await interaction.reply({ content: "Select your preferred language:", components: rows(), ephemeral: false });
   },
 
   async handleComponent(interaction) {
@@ -33,7 +33,7 @@ export default {
 
     const lang = interaction.customId.split(":")[1];
     if (!env.MONGO_URI) {
-      await interaction.reply({ content: "Mongo no configurado (MONGO_URI).", ephemeral: true });
+      await interaction.reply({ content: "Mongo is not configured (MONGO_URI).", ephemeral: true });
       return true;
     }
     const db = await getMongoDb(env.MONGO_URI, env.MONGO_DB);
@@ -43,7 +43,7 @@ export default {
       { upsert: true }
     );
 
-    await interaction.reply({ content: `Idioma guardado: **${lang.toUpperCase()}**`, ephemeral: true });
+    await interaction.reply({ content: `Saved language: **${lang.toUpperCase()}**`, ephemeral: true });
     return true;
   }
 };

@@ -30,13 +30,13 @@ async function googleTranslate(q, to) {
 export default {
   data: new SlashCommandBuilder()
     .setName("ocr")
-    .setDescription("OCR + traducir (imagen adjunta)")
-    .addAttachmentOption((o) => o.setName("imagen").setDescription("Imagen para OCR").setRequired(true))
-    .addStringOption((o) => o.setName("to").setDescription("Idioma destino (es,en,fr,de,it,pt)").setRequired(false)),
+    .setDescription("🧠 OCR + translate (attachment)")
+    .addAttachmentOption((o) => o.setName("image").setDescription("Image for OCR").setRequired(true))
+    .addStringOption((o) => o.setName("to").setDescription("Target language (es,en,fr,de,it,pt)").setRequired(false)),
   async execute(interaction) {
     await interaction.deferReply({ ephemeral: true });
 
-    const att = interaction.options.getAttachment("imagen", true);
+    const att = interaction.options.getAttachment("image", true);
     const toOpt = interaction.options.getString("to", false);
 
     let to = (toOpt || "").trim().toLowerCase();
@@ -57,15 +57,17 @@ export default {
     await worker.terminate();
 
     const text = (data?.text || "").trim();
-    if (!text) return interaction.editReply({ content: "No se detectó texto." });
+    if (!text) return interaction.editReply({ content: "No text detected." });
 
     const translated = await googleTranslate(text, to).catch(() => "");
     const out = translated || text;
 
     // send DM with result file
     const file = new AttachmentBuilder(Buffer.from(out, "utf-8"), { name: "translation.txt" });
-    await interaction.user.send({ content: `Resultado (${to.toUpperCase()}):\n\n${out.slice(0, 1900)}`, files: [file] }).catch(() => null);
+    await interaction.user
+      .send({ content: `Result (${to.toUpperCase()}):\n\n${out.slice(0, 1900)}`, files: [file] })
+      .catch(() => null);
 
-    await interaction.editReply({ content: "He enviado el resultado por DM." });
+    await interaction.editReply({ content: "Sent via DM." });
   }
 };

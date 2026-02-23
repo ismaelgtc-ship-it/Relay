@@ -21,8 +21,8 @@ function components() {
 }
 
 export default {
-  data: new SlashCommandBuilder().setName("select_language_edit").setDescription("Re-publica panel de idioma (botones)"),
+  data: new SlashCommandBuilder().setName("language_panel").setDescription("🧩 Re-publish the language panel (buttons)"),
   async execute(interaction) {
-    await interaction.reply({ content: "Panel actualizado. Selecciona idioma:", components: components(), ephemeral: false });
+    await interaction.reply({ content: "Panel updated. Select a language:", components: components(), ephemeral: false });
   }
 };

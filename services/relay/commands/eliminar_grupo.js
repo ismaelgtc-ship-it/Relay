@@ -2,21 +2,21 @@ import { SlashCommandBuilder, ActionRowBuilder, StringSelectMenuBuilder } from "
 import { fetchMirrorModule, saveMirrorConfig, normalizeGroups } from "./_mirrorStore.js";
 
 export default {
-  data: new SlashCommandBuilder().setName("eliminar_grupo").setDescription("Elimina un grupo de espejo"),
+  data: new SlashCommandBuilder().setName("delete_group").setDescription("🗑️ Delete a Mirror group"),
   async execute(interaction) {
     await interaction.deferReply({ ephemeral: true });
     const mod = await fetchMirrorModule();
     const cfg = mod?.config || {};
     const groups = normalizeGroups(cfg);
-    if (!groups.length) return interaction.editReply({ content: "No hay grupos." });
+    if (!groups.length) return interaction.editReply({ content: "No groups found." });
 
     const menu = new StringSelectMenuBuilder()
       .setCustomId("mirror:delete_group")
-      .setPlaceholder("Selecciona grupo")
+      .setPlaceholder("Select a group")
       .addOptions(groups.slice(0, 25).map((g) => ({ label: g.name, value: g.name })));
 
     const row = new ActionRowBuilder().addComponents(menu);
-    await interaction.editReply({ content: "Elige el grupo a eliminar:", components: [row] });
+    await interaction.editReply({ content: "Choose a group to delete:", components: [row] });
   },
 
   async handleComponent(interaction) {
@@ -30,7 +30,7 @@ export default {
     const groups = normalizeGroups(cfg).filter((g) => g.name !== target);
 
     await saveMirrorConfig({ active: true, config: { ...cfg, groups } });
-    await interaction.editReply({ content: `Grupo eliminado: **${target}**`, components: [] });
+    await interaction.editReply({ content: `Group deleted: **${target}**`, components: [] });
     return true;
   }
 };

@@ -12,12 +12,12 @@ async function googleTranslate(q, to) {
 }
 
 export default {
-  data: new ContextMenuCommandBuilder().setName("TRANSLATE").setType(ApplicationCommandType.Message),
+  data: new ContextMenuCommandBuilder().setName("Translate").setType(ApplicationCommandType.Message),
   async execute(interaction) {
     await interaction.deferReply({ ephemeral: true });
     const msg = interaction.targetMessage;
     const content = (msg?.content || "").trim();
-    if (!content) return interaction.editReply({ content: "Mensaje vacío." });
+    if (!content) return interaction.editReply({ content: "Empty message." });
 
     let to = "es";
     if (env.MONGO_URI) {
@@ -27,6 +27,6 @@ export default {
     }
 
     const translated = await googleTranslate(content, to).catch(() => "");
-    await interaction.editReply({ content: translated ? translated.slice(0, 2000) : "No se pudo traducir." });
+    await interaction.editReply({ content: translated ? translated.slice(0, 2000) : "Translation failed." });
   }
 };
