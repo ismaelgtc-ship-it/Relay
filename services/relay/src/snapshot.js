@@ -1,3 +1,5 @@
+// NOTE: Keep `buildSnapshot` export for compatibility with existing HTTP routes.
+// The canonical implementation is `buildGuildSnapshot`.
 export async function buildGuildSnapshot(guild) {
   const roles = guild.roles.cache
     .sort((a, b) => b.position - a.position)
@@ -36,4 +38,9 @@ export async function buildGuildSnapshot(guild) {
     channels,
     ts: new Date().toISOString()
   };
+}
+
+// Back-compat export used by src/http/routes.js
+export async function buildSnapshot(guild) {
+  return buildGuildSnapshot(guild);
 }
