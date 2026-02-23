@@ -4,6 +4,147 @@ import { getLatestSnapshot, saveSnapshot } from "../snapshot/store.js";
 import { buildSnapshot } from "../snapshot.js";
 import { getMongoDb } from "../db/mongo.js";
 import { calendarService } from "../modules/calendar/service.js";
+import { getCommand } from "../../commands/index.js";
+
+function asPlainEmbed(e) {
+  if (!e) return null;
+  if (typeof e.toJSON === "function") return e.toJSON();
+  if (typeof e === "object") return e;
+  return { description: String(e) };
+}
+
+function createSyntheticInteraction({ name, options, client, guildId }) {
+  const state = {
+    deferred: false,
+    replied: false,
+    ephemeral: true,
+    last: null
+  };
+
+  const opts = options && typeof options === "object" ? options : {};
+
+  const resolver = {
+    getString: (key, required = false) => {
+      const v = opts?.[key];
+      if ((v === undefined || v === null || v === "") && required) throw new Error(`Missing option: ${key}`);
+      if (v === undefined || v === null) return null;
+      return String(v);
+    },
+    getBoolean: (key, required = false) => {
+      const v = opts?.[key];
+      if (v === undefined || v === null) {
+        if (required) throw new Error(`Missing option: ${key}`);
+        return null;
+      }
+      return Boolean(v);
+    },
+    getInteger: (key, required = false) => {
+      const v = opts?.[key];
+      if (v === undefined || v === null || v === "") {
+        if (required) throw new Error(`Missing option: ${key}`);
+        return null;
+      }
+      const n = Number(v);
+      if (!Number.isFinite(n)) throw new Error(`Invalid integer option: ${key}`);
+      return Math.trunc(n);
+    },
+    getChannel: async (key, required = false) => {
+      const v = opts?.[key];
+      if ((v === undefined || v === null || v === "") && required) throw new Error(`Missing option: ${key}`);
+      if (v === undefined || v === null || v === "") return null;
+      const id = typeof v === "string" ? v : String(v?.id || "");
+      if (!id) throw new Error(`Invalid channel option: ${key}`);
+      if (!client) throw new Error("Discord client not ready");
+      const channel = await client.channels.fetch(id).catch(() => null);
+      if (!channel) {
+        if (required) throw new Error(`Channel not found: ${id}`);
+        return null;
+      }
+      return channel;
+    },
+    getUser: async (key, required = false) => {
+      const v = opts?.[key];
+      if ((v === undefined || v === null || v === "") && required) throw new Error(`Missing option: ${key}`);
+      if (v === undefined || v === null || v === "") return null;
+      const id = typeof v === "string" ? v : String(v?.id || "");
+      if (!id) throw new Error(`Invalid user option: ${key}`);
+      if (!client) throw new Error("Discord client not ready");
+      const user = await client.users.fetch(id).catch(() => null);
+      if (!user) {
+        if (required) throw new Error(`User not found: ${id}`);
+        return null;
+      }
+      return user;
+    },
+    getRole: async (key, required = false) => {
+      const v = opts?.[key];
+      if ((v === undefined || v === null || v === "") && required) throw new Error(`Missing option: ${key}`);
+      if (v === undefined || v === null || v === "") return null;
+      const id = typeof v === "string" ? v : String(v?.id || "");
+      if (!id) throw new Error(`Invalid role option: ${key}`);
+      if (!client) throw new Error("Discord client not ready");
+      const gid = guildId || env.GUILD_ID;
+      if (!gid) throw new Error("Missing guildId");
+      const guild = client.guilds.cache.get(gid) ?? (await client.guilds.fetch(gid).catch(() => null));
+      if (!guild) throw new Error("Guild not found");
+      await guild.roles.fetch().catch(() => null);
+      const role = guild.roles.cache.get(id) || null;
+      if (!role) {
+        if (required) throw new Error(`Role not found: ${id}`);
+        return null;
+      }
+      return role;
+    }
+  };
+
+  function normalizePayload(p) {
+    const payload = p && typeof p === "object" ? { ...p } : { content: String(p ?? "") };
+    if (Array.isArray(payload.embeds)) payload.embeds = payload.embeds.map(asPlainEmbed).filter(Boolean);
+    return payload;
+  }
+
+  const interaction = {
+    commandName: name,
+    guildId: guildId || env.GUILD_ID || null,
+    user: { id: "dashboard", tag: "dashboard" },
+    member: null,
+    channelId: null,
+    deferred: false,
+    replied: false,
+    options: {
+      getString: resolver.getString,
+      getBoolean: resolver.getBoolean,
+      getInteger: resolver.getInteger,
+      getChannel: (key, required) => resolver.getChannel(key, required),
+      getUser: (key, required) => resolver.getUser(key, required),
+      getRole: (key, required) => resolver.getRole(key, required)
+    },
+    async deferReply({ ephemeral } = {}) {
+      state.deferred = true;
+      interaction.deferred = true;
+      state.ephemeral = ephemeral !== undefined ? Boolean(ephemeral) : true;
+      return;
+    },
+    async reply(payload) {
+      state.replied = true;
+      interaction.replied = true;
+      state.last = normalizePayload(payload);
+      return;
+    },
+    async editReply(payload) {
+      state.replied = true;
+      interaction.replied = true;
+      state.last = normalizePayload(payload);
+      return;
+    },
+    async followUp(payload) {
+      state.last = normalizePayload(payload);
+      return;
+    }
+  };
+
+  return { interaction, getState: () => state };
+}
 
 function json(res, status, body) {
   const payload = JSON.stringify(body);
@@ -128,6 +269,37 @@ export function createRoutes({ getClient }) {
         if (!member) return json(res, 404, { error: "member not found" });
         await member.roles.remove(roleId).catch((e) => { throw e; });
         return json(res, 200, { ok: true });
+      }
+
+      // Command execution (Dashboard -> Relay)
+      // Body: { name: "create_group", options: { ... }, guildId?: "..." }
+      if (pathname === "/api/dashboard/commands/execute" && req.method === "POST") {
+        if (!dashboardOk(req)) return json(res, 401, { error: "unauthorized" });
+        if (!client) return json(res, 503, { error: "discord not ready" });
+
+        const body = await readBody(req);
+        const name = String(body?.name || "").trim();
+        const guildId = String(body?.guildId || env.GUILD_ID || "").trim();
+        const options = body?.options && typeof body.options === "object" ? body.options : {};
+
+        if (!name) return json(res, 400, { ok: false, error: "missing command name" });
+
+        const cmd = getCommand(name);
+        if (!cmd || typeof cmd.execute !== "function") return json(res, 404, { ok: false, error: "unknown command" });
+
+        const { interaction, getState } = createSyntheticInteraction({ name, options, client, guildId });
+
+        try {
+          // Execute using the same handler used by Discord interactions.
+          await cmd.execute(interaction);
+          const st = getState();
+          return json(res, 200, { ok: true, command: name, response: st.last || null, meta: { deferred: st.deferred, replied: st.replied, ephemeral: st.ephemeral } });
+        } catch (err) {
+          console.error("[dashboard] command execute failed", { name, err });
+          const msg = String(err?.message || err);
+          const st = getState();
+          return json(res, 400, { ok: false, error: "command_failed", message: msg, command: name, response: st.last || null });
+        }
       }
 
       // Calendar (Dashboard)
