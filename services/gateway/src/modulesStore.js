@@ -55,13 +55,15 @@ export async function listModules() {
   const cfgMap = new Map(configs.map((d) => [d.name, d]));
   const lockMap = new Map(locks.map((d) => [d.name, d]));
 
-  return Object.entries(MODULE_MANIFEST).map(([name, meta]) => {
+  // MODULE_MANIFEST is an array of { name, owner, description }
+  return MODULE_MANIFEST.map((meta) => {
+    const name = meta?.name;
     const cfg = cfgMap.get(name);
     const lock = lockMap.get(name);
     return {
       name,
-      owner: meta.owner,
-      description: meta.description,
+      owner: meta?.owner ?? "unknown",
+      description: meta?.description ?? "",
       active: Boolean(cfg?.active ?? false),
       locked: Boolean(lock?.locked ?? false),
       config: cfg?.config ?? {}
@@ -74,7 +76,10 @@ export async function getModule(name) {
   const db = await getDb();
   const cfg = await db.collection(COL_CONFIG).findOne({ name });
   const lock = await db.collection(COL_LOCKS).findOne({ name });
-  const meta = MODULE_MANIFEST[name];
+  const meta = MODULE_MANIFEST.find((m) => m.name === name);
+
+  // Defensive: avoid crashing the process if the manifest gets out of sync.
+  if (!meta) return null;
 
   return {
     name,
