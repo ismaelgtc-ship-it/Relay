@@ -1,57 +1,18 @@
-import http from "node:http";
 import { Client, GatewayIntentBits, Events, REST, Routes } from "discord.js";
 import { env } from "./env.js";
 import { commands, getCommand } from "../commands/index.js";
 import { gatewayRegister, gatewayHeartbeat, gatewayGetModule } from "./gatewayClient.js";
 import { createMirrorRuntime } from "./modules/mirror.js";
-import { buildGuildSnapshot } from "./snapshot.js";
+import { startHttpServer } from "./http/server.js";
+import { calendarService } from "./modules/calendar/service.js";
 
 const mirror = createMirrorRuntime();
 
-// Render health checks require an HTTP listener.
-const server = http.createServer(async (req, res) => {
-  const url = req.url ?? "/";
-
-  if (url === "/" || url === "/healthz") {
-    res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ ok: true, service: "relay", ts: new Date().toISOString() }));
-    return;
-  }
-
-  if (url === "/internal/snapshot") {
-    const secret = req.headers["x-relay-secret"];
-    if (!secret || secret !== env.SNAPSHOT_API_KEY) {
-      res.writeHead(401, { "content-type": "application/json" });
-      res.end(JSON.stringify({ ok: false, error: "UNAUTHORIZED" }));
-      return;
-    }
-
-    const guild = client.guilds.cache.get(env.GUILD_ID) ?? (await client.guilds.fetch(env.GUILD_ID).catch(() => null));
-    if (!guild) {
-      res.writeHead(404, { "content-type": "application/json" });
-      res.end(JSON.stringify({ ok: false, error: "GUILD_NOT_FOUND" }));
-      return;
-    }
-
-    await guild.roles.fetch().catch(() => null);
-    await guild.channels.fetch().catch(() => null);
-
-    const snapshot = await buildGuildSnapshot(guild);
-    res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ ok: true, snapshot }));
-    return;
-  }
-
-  res.writeHead(404, { "content-type": "application/json" });
-  res.end(JSON.stringify({ ok: false, error: "NOT_FOUND" }));
-});
-
-server.listen(env.PORT, "0.0.0.0", () => {
-  console.log(`[relay] http listening on :${env.PORT}`);
-});
+// HTTP server (health, dashboard API, snapshot API)
+startHttpServer({ client: null });
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMessageReactions]
 });
 
 async function refreshModules() {
@@ -89,11 +50,15 @@ client.once(Events.ClientReady, async () => {
     meta: { slug: "relay" }
   }).catch((e) => console.error("[relay] gateway register failed", e));
 
-  // Register slash commands (only non-control commands allowed)
+  // Start HTTP routes with live client
+  startHttpServer({ client });
+
+  // Register slash commands
   const rest = new REST({ version: "10" }).setToken(env.DISCORD_TOKEN);
-  await rest.put(Routes.applicationGuildCommands(env.CLIENT_ID, env.GUILD_ID), {
-    body: commands.map((c) => c.data)
-  });
+  const slash = commands
+    .filter((c) => c && c.data && typeof c.data.name === "string")
+    .map((c) => (typeof c.data.toJSON === "function" ? c.data.toJSON() : c.data));
+  await rest.put(Routes.applicationGuildCommands(env.CLIENT_ID, env.GUILD_ID), { body: slash });
 
   console.log("[relay] slash commands registered");
 
@@ -109,26 +74,59 @@ client.once(Events.ClientReady, async () => {
   // Module refresh loop
   await refreshModules().catch(() => null);
   setInterval(() => refreshModules().catch(() => null), 10_000);
+
+  // Calendar sync (optional)
+  await calendarService.init({ client }).catch((e) => console.error("[calendar] init failed", e));
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
-  if (!interaction.isChatInputCommand()) return;
+  // Calendar buttons (interest / polls)
+  const calHandled = await calendarService.handleInteraction(interaction).catch(() => false);
+  if (calHandled) return;
 
-  const command = getCommand(interaction.commandName);
-  if (!command) return;
+  // Chat input commands
+  if (interaction.isChatInputCommand()) {
+    const command = getCommand(interaction.commandName);
+    if (!command) return;
+    try {
+      await command.execute(interaction, { client, mirror });
+    } catch (err) {
+      console.error("[relay] command error", err);
+      const msg = "Error executing command.";
+      if (interaction.replied || interaction.deferred) {
+        await interaction.followUp({ content: msg, ephemeral: true }).catch(() => null);
+      } else {
+        await interaction.reply({ content: msg, ephemeral: true }).catch(() => null);
+      }
+    }
+    return;
+  }
 
-  try {
-    await command.execute(interaction);
-  } catch (err) {
-    console.error("[relay] command error", err);
-    if (!interaction.replied && !interaction.deferred) {
-      await interaction.reply({ content: "Command error.", ephemeral: true });
+  // Context menu
+  if (interaction.isContextMenuCommand()) {
+    const command = getCommand(interaction.commandName);
+    if (!command) return;
+    try {
+      await command.execute(interaction, { client, mirror });
+    } catch (err) {
+      console.error("[relay] context error", err);
+      await interaction.reply({ content: "Error.", ephemeral: true }).catch(() => null);
+    }
+    return;
+  }
+
+  // Buttons / selects / modals handled by commands that expose `handleComponent`
+  const handler = getCommand("select_language") || null;
+  const any = commands.find((c) => typeof c.handleComponent === "function");
+  for (const c of commands) {
+    if (typeof c.handleComponent !== "function") continue;
+    try {
+      const handled = await c.handleComponent(interaction, { client, mirror });
+      if (handled) return;
+    } catch (err) {
+      console.error("[relay] component handler error", err);
     }
   }
-});
-
-client.on(Events.MessageCreate, async (message) => {
-  await mirror.onMessage(message);
 });
 
 client.login(env.DISCORD_TOKEN);

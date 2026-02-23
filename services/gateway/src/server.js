@@ -90,6 +90,38 @@ app.post("/internal/heartbeat", requireInternalKey, async (req, res) => {
   return res.json({ ok: true });
 });
 
+// Module control (Bots -> Gateway)
+app.get("/internal/modules", requireInternalKey, async (_req, res) => {
+  const modules = await listModules();
+  res.json({ ok: true, modules });
+});
+
+app.put("/internal/module/:name/config", requireInternalKey, async (req, res) => {
+  const name = String(req.params.name);
+  if (!isKnownModule(name)) return res.status(404).json({ ok: false, error: "UNKNOWN_MODULE" });
+  const { active, config } = req.body ?? {};
+  const result = await setModuleConfig(name, { active, config }, "internal");
+  if (!result.ok) return res.status(400).json({ ok: false, error: result.error, details: result.details });
+  const mod = await getModule(name);
+  return res.json({ ok: true, module: mod });
+});
+
+app.post("/internal/module/:name/lock", requireInternalKey, async (req, res) => {
+  const name = String(req.params.name);
+  const result = await lockModule(name, "internal");
+  if (!result.ok) return res.status(404).json({ ok: false, error: result.error });
+  const mod = await getModule(name);
+  return res.json({ ok: true, module: mod });
+});
+
+app.post("/internal/module/:name/unlock", requireInternalKey, async (req, res) => {
+  const name = String(req.params.name);
+  const result = await unlockModule(name, "internal");
+  if (!result.ok) return res.status(404).json({ ok: false, error: result.error });
+  const mod = await getModule(name);
+  return res.json({ ok: true, module: mod });
+});
+
 // Module state (Bots -> Gateway)
 app.get("/internal/module/:name", requireInternalKey, async (req, res) => {
   const name = String(req.params.name);
