@@ -57,7 +57,7 @@ export function createRoutes({ getClient }) {
       const { pathname } = u;
       const client = typeof getClient === "function" ? getClient() : null;
 
-      if (pathname === "/health") {
+      if (pathname === "/health" || pathname === "/healthz") {
         return json(res, 200, { status: "ok", service: "relay", version: env.SERVICE_VERSION });
       }
       // Dashboard API (Warroom -> Relay)
