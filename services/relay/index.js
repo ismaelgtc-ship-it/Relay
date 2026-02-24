@@ -11,14 +11,30 @@ if (!DISCORD_TOKEN) throw new Error("Missing env: DISCORD_TOKEN");
 if (!CLIENT_ID) throw new Error("Missing env: CLIENT_ID");
 if (!GUILD_ID) throw new Error("Missing env: GUILD_ID");
 
-// Render (Free) Web Service health checks require an HTTP listener.
+// Render Web Service health checks require an HTTP listener.
+// Warroom (Cloudflare Pages) calls /health, so we expose both /health and /healthz.
 const server = http.createServer((req, res) => {
   const url = req.url ?? "/";
-  if (url === "/healthz" || url === "/") {
+
+  // Basic CORS so Warroom can fetch from the browser.
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Origin, X-Requested-With, Content-Type, Accept, X-API-Key"
+  );
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  if ((req.method ?? "GET").toUpperCase() === "OPTIONS") {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ status: "ok" }));
+    return;
+  }
+
+  if (url === "/health" || url === "/healthz" || url === "/") {
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify({ status: "ok", service: "relay" }));
     return;
   }
+
   res.writeHead(404, { "content-type": "application/json" });
   res.end(JSON.stringify({ status: "not_found" }));
 });
