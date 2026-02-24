@@ -5,9 +5,20 @@ import { buildSnapshot } from "../snapshot.js";
 import { getMongoDb } from "../db/mongo.js";
 import { calendarService } from "../modules/calendar/service.js";
 
+
+function corsHeaders() {
+  return {
+    "access-control-allow-origin": "*",
+    "access-control-allow-headers": "Origin, X-Requested-With, Content-Type, Accept, X-API-Key",
+    "access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS",
+    "access-control-max-age": "86400"
+  };
+}
+
 function json(res, status, body) {
   const payload = JSON.stringify(body);
   res.writeHead(status, {
+    ...corsHeaders(),
     "content-type": "application/json; charset=utf-8",
     "content-length": Buffer.byteLength(payload)
   });
@@ -15,7 +26,11 @@ function json(res, status, body) {
 }
 
 function text(res, status, body) {
-  res.writeHead(status, { "content-type": "text/plain; charset=utf-8" });
+  res.writeHead(status, {
+    ...corsHeaders(),
+    "content-type": "application/json; charset=utf-8",
+    "content-length": Buffer.byteLength(payload)
+  });
   res.end(body);
 }
 
@@ -57,6 +72,12 @@ export function createRoutes({ getClient }) {
       const { pathname } = u;
       const client = typeof getClient === "function" ? getClient() : null;
 
+      // CORS preflight
+      if (req.method === "OPTIONS") {
+        res.writeHead(204, { ...corsHeaders() });
+        return res.end();
+      }
+
       if (pathname === "/health" || pathname === "/healthz") {
         return json(res, 200, { status: "ok", service: "relay", version: env.SERVICE_VERSION });
       }
@@ -78,38 +99,13 @@ export function createRoutes({ getClient }) {
         await guild.channels.fetch().catch(() => null);
         await guild.roles.fetch().catch(() => null);
 
-        // Full channel map (categories + text/voice/forum/etc)
         const channels = guild.channels.cache
-          .filter((c) => !!c)
-          .map((c) => ({
-            id: c.id,
-            name: c.name,
-            type: c.type,
-            parentId: c.parentId ?? null,
-            position: c.rawPosition ?? 0,
-            nsfw: !!c.nsfw,
-            topic: "topic" in c ? (c.topic ?? null) : null,
-            rateLimitPerUser: "rateLimitPerUser" in c ? (c.rateLimitPerUser ?? null) : null,
-            permissionOverwrites: Array.from(c.permissionOverwrites?.cache?.values?.() || []).map((ow) => ({
-              id: ow.id,
-              type: ow.type,
-              allow: ow.allow?.bitfield?.toString?.() ?? String(ow.allow ?? "0"),
-              deny: ow.deny?.bitfield?.toString?.() ?? String(ow.deny ?? "0")
-            }))
-          }))
+          .filter((c) => c && c.isTextBased())
+          .map((c) => ({ id: c.id, name: c.name, type: c.type, parentId: c.parentId ?? null, position: c.rawPosition ?? 0 }))
           .sort((a, b) => a.position - b.position);
 
         const roles = guild.roles.cache
-          .map((r) => ({
-            id: r.id,
-            name: r.name,
-            position: r.position,
-            color: r.color,
-            managed: r.managed,
-            hoist: r.hoist,
-            mentionable: r.mentionable,
-            permissions: r.permissions?.bitfield?.toString?.() ?? String(r.permissions ?? "0")
-          }))
+          .map((r) => ({ id: r.id, name: r.name, position: r.position, color: r.color, managed: r.managed }))
           .sort((a, b) => b.position - a.position);
 
         // Members can be heavy; limit
@@ -120,117 +116,6 @@ export function createRoutes({ getClient }) {
           .slice(0, max);
 
         return json(res, 200, { ok: true, guild: { id: guild.id, name: guild.name }, channels, roles, members });
-      }
-
-      // --- Admin CRUD (Dashboard -> Relay) ---
-      // Create a category
-      if (pathname === "/api/dashboard/category/create" && req.method === "POST") {
-        if (!dashboardOk(req)) return json(res, 401, { error: "unauthorized" });
-        if (!client) return json(res, 503, { error: "discord not ready" });
-        const body = await readBody(req);
-        const guildId = String(body?.guildId || env.GUILD_ID || "");
-        const name = String(body?.name || "").trim();
-        if (!guildId || !name) return json(res, 400, { error: "bad request" });
-        const guild = client.guilds.cache.get(guildId) ?? (await client.guilds.fetch(guildId).catch(() => null));
-        if (!guild) return json(res, 404, { error: "guild not found" });
-        const created = await guild.channels.create({ name, type: 4 }).catch((e) => ({ __err: e }));
-        if (created?.__err) return json(res, 400, { error: "discord_error", detail: String(created.__err?.message || created.__err) });
-        return json(res, 200, { ok: true, id: created.id, name: created.name });
-      }
-
-      // Create a text channel under a category (or root)
-      if (pathname === "/api/dashboard/channel/create" && req.method === "POST") {
-        if (!dashboardOk(req)) return json(res, 401, { error: "unauthorized" });
-        if (!client) return json(res, 503, { error: "discord not ready" });
-        const body = await readBody(req);
-        const guildId = String(body?.guildId || env.GUILD_ID || "");
-        const name = String(body?.name || "").trim();
-        const parentId = body?.parentId ? String(body.parentId) : null;
-        if (!guildId || !name) return json(res, 400, { error: "bad request" });
-        const guild = client.guilds.cache.get(guildId) ?? (await client.guilds.fetch(guildId).catch(() => null));
-        if (!guild) return json(res, 404, { error: "guild not found" });
-        const created = await guild.channels.create({ name, type: 0, parent: parentId || undefined }).catch((e) => ({ __err: e }));
-        if (created?.__err) return json(res, 400, { error: "discord_error", detail: String(created.__err?.message || created.__err) });
-        return json(res, 200, { ok: true, id: created.id, name: created.name, parentId: created.parentId ?? null });
-      }
-
-      // Move channel to a category (or root)
-      if (pathname === "/api/dashboard/channel/move" && req.method === "POST") {
-        if (!dashboardOk(req)) return json(res, 401, { error: "unauthorized" });
-        if (!client) return json(res, 503, { error: "discord not ready" });
-        const body = await readBody(req);
-        const channelId = String(body?.channelId || "");
-        const parentId = body?.parentId ? String(body.parentId) : null;
-        if (!channelId) return json(res, 400, { error: "bad request" });
-        const channel = await client.channels.fetch(channelId).catch(() => null);
-        if (!channel) return json(res, 404, { error: "channel not found" });
-        const updated = await channel.setParent(parentId || null).catch((e) => ({ __err: e }));
-        if (updated?.__err) return json(res, 400, { error: "discord_error", detail: String(updated.__err?.message || updated.__err) });
-        return json(res, 200, { ok: true });
-      }
-
-      // Delete channel
-      if (pathname === "/api/dashboard/channel/delete" && req.method === "POST") {
-        if (!dashboardOk(req)) return json(res, 401, { error: "unauthorized" });
-        if (!client) return json(res, 503, { error: "discord not ready" });
-        const body = await readBody(req);
-        const channelId = String(body?.channelId || "");
-        if (!channelId) return json(res, 400, { error: "bad request" });
-        const channel = await client.channels.fetch(channelId).catch(() => null);
-        if (!channel) return json(res, 404, { error: "channel not found" });
-        const out = await channel.delete().catch((e) => ({ __err: e }));
-        if (out?.__err) return json(res, 400, { error: "discord_error", detail: String(out.__err?.message || out.__err) });
-        return json(res, 200, { ok: true });
-      }
-
-      // Create role
-      if (pathname === "/api/dashboard/role/create" && req.method === "POST") {
-        if (!dashboardOk(req)) return json(res, 401, { error: "unauthorized" });
-        if (!client) return json(res, 503, { error: "discord not ready" });
-        const body = await readBody(req);
-        const guildId = String(body?.guildId || env.GUILD_ID || "");
-        const name = String(body?.name || "").trim();
-        if (!guildId || !name) return json(res, 400, { error: "bad request" });
-        const guild = client.guilds.cache.get(guildId) ?? (await client.guilds.fetch(guildId).catch(() => null));
-        if (!guild) return json(res, 404, { error: "guild not found" });
-        const created = await guild.roles.create({ name }).catch((e) => ({ __err: e }));
-        if (created?.__err) return json(res, 400, { error: "discord_error", detail: String(created.__err?.message || created.__err) });
-        return json(res, 200, { ok: true, id: created.id, name: created.name });
-      }
-
-      // Delete role
-      if (pathname === "/api/dashboard/role/delete" && req.method === "POST") {
-        if (!dashboardOk(req)) return json(res, 401, { error: "unauthorized" });
-        if (!client) return json(res, 503, { error: "discord not ready" });
-        const body = await readBody(req);
-        const guildId = String(body?.guildId || env.GUILD_ID || "");
-        const roleId = String(body?.roleId || "");
-        if (!guildId || !roleId) return json(res, 400, { error: "bad request" });
-        const guild = client.guilds.cache.get(guildId) ?? (await client.guilds.fetch(guildId).catch(() => null));
-        if (!guild) return json(res, 404, { error: "guild not found" });
-        const role = guild.roles.cache.get(roleId) ?? (await guild.roles.fetch(roleId).catch(() => null));
-        if (!role) return json(res, 404, { error: "role not found" });
-        const out = await role.delete().catch((e) => ({ __err: e }));
-        if (out?.__err) return json(res, 400, { error: "discord_error", detail: String(out.__err?.message || out.__err) });
-        return json(res, 200, { ok: true });
-      }
-
-      // Assign role to member
-      if (pathname === "/api/dashboard/member/role/add" && req.method === "POST") {
-        if (!dashboardOk(req)) return json(res, 401, { error: "unauthorized" });
-        if (!client) return json(res, 503, { error: "discord not ready" });
-        const body = await readBody(req);
-        const guildId = String(body?.guildId || env.GUILD_ID || "");
-        const userId = String(body?.userId || "");
-        const roleId = String(body?.roleId || "");
-        if (!guildId || !userId || !roleId) return json(res, 400, { error: "bad request" });
-        const guild = client.guilds.cache.get(guildId) ?? (await client.guilds.fetch(guildId).catch(() => null));
-        if (!guild) return json(res, 404, { error: "guild not found" });
-        const member = await guild.members.fetch(userId).catch(() => null);
-        if (!member) return json(res, 404, { error: "member not found" });
-        const out = await member.roles.add(roleId).catch((e) => ({ __err: e }));
-        if (out?.__err) return json(res, 400, { error: "discord_error", detail: String(out.__err?.message || out.__err) });
-        return json(res, 200, { ok: true });
       }
 
       if (pathname === "/api/dashboard/channel/rename" && req.method === "POST") {
